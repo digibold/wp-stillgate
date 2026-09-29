@@ -65,7 +65,15 @@ jobs:
           coverage: none
           tools: cs2pr
       - uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
-      - run: vendor/bin/phpcs --standard=phpcs.xml.dist --report=checkstyle | cs2pr
+      # -q (quiet) is required here: phpcs.xml.dist sets <arg value="sp"/> for
+      # normal local use (show sniff codes, show progress), and the "p"
+      # progress indicator writes its own text to stdout ahead of and after
+      # the report, regardless of --report=. That leaves stdout as progress
+      # dots + blank lines + the checkstyle XML + a "Time:/Memory:" footer —
+      # not a well-formed XML document — which cs2pr cannot parse. -q
+      # disables both, so stdout is exactly the checkstyle report cs2pr
+      # expects; it does not change which sniffs run or what they find.
+      - run: vendor/bin/phpcs --standard=phpcs.xml.dist --report=checkstyle -q | cs2pr
 
   version-check:
     name: Version consistency
