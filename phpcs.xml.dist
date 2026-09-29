@@ -1,0 +1,73 @@
+<?xml version="1.0"?>
+<ruleset name="Deployment Guard">
+	<description>Coding standards for the Deployment Guard plugin.</description>
+
+	<!--
+	Scoped to the code that ships in the plugin: not the test suite (tests
+	are validated by passing, and deliberately use looser conventions of
+	their own — short-lived helper globals, an empty catch used purely to
+	let execution continue to the next assertion, and so on — that would
+	otherwise need sniff-by-sniff exceptions throughout), and not bin/,
+	which is a plain CLI build-tooling script with no WordPress runtime at
+	all, so the WordPress-specific sniffs (WP_Filesystem, output escaping,
+	global-prefixing) do not meaningfully apply to it either.
+	-->
+	<file>deployment-guard.php</file>
+	<file>uninstall.php</file>
+	<file>src</file>
+
+	<arg name="extensions" value="php"/>
+	<arg name="basepath" value="."/>
+	<arg name="colors"/>
+	<arg name="parallel" value="8"/>
+	<arg value="sp"/>
+
+	<config name="testVersion" value="8.1-"/>
+	<config name="minimum_wp_version" value="6.6"/>
+
+	<rule ref="PHPCompatibilityWP"/>
+
+	<!--
+	WordPress-Extra (Core + Extra) rather than the full WordPress ruleset:
+	the difference is WordPress-Docs, which requires a complete DocBlock
+	(with an @since tag) on every single method and property, public or
+	private. That is a documentation-completeness convention for
+	WordPress core itself, not a coding-standard or security rule, and
+	this project already documents its public API and every non-obvious
+	private method; WordPress-Extra keeps every security, sanitization,
+	escaping and best-practice sniff.
+	-->
+	<rule ref="WordPress-Extra">
+		<!-- The project uses short array syntax throughout. -->
+		<exclude name="Universal.Arrays.DisallowShortArraySyntax"/>
+		<!-- Classes are autoloaded PSR-4-style (StudlyCase filenames matching class names), not the WordPress filename convention. -->
+		<exclude name="WordPress.Files.FileName.InvalidClassFileName"/>
+		<exclude name="WordPress.Files.FileName.NotHyphenatedLowercase"/>
+	</rule>
+
+	<rule ref="WordPress.WP.I18n">
+		<properties>
+			<property name="text_domain" type="array">
+				<element value="deployment-guard"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.NamingConventions.PrefixAllGlobals">
+		<properties>
+			<property name="prefixes" type="array">
+				<element value="Digibold\DeploymentGuard"/>
+				<element value="deployment_guard"/>
+			</property>
+		</properties>
+	</rule>
+
+	<rule ref="WordPress.WP.Capabilities">
+		<properties>
+			<property name="custom_capabilities" type="array">
+				<element value="deployment_guard_bypass"/>
+			</property>
+		</properties>
+	</rule>
+
+</ruleset>

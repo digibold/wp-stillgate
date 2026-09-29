@@ -1,0 +1,228 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  schedule:
+    # Catches drift against newly released WordPress/PHP versions even
+    # without new commits (Mondays at 06:00 UTC).
+    - cron: '0 6 * * 1'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+env:
+  # Composer dependencies have no runtime effect on the test outcome, so a
+  # single lock-free "highest" resolution per job is enough; no matrix
+  # dimension is spent on dependency versions.
+  COMPOSER_NO_INTERACTION: '1'
+
+jobs:
+  lint:
+    name: Lint (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.1', '8.4']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - name: PHP syntax check
+        run: |
+          find . -name '*.php' \
+            -not -path './vendor/*' \
+            -not -path './wordpress/*' \
+            -print0 | xargs -0 -n1 php -l
+
+  composer-validate:
+    name: Composer validate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: composer validate --strict --no-check-lock
+
+  phpcs:
+    name: PHPCS (WordPress Coding Standards)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.3'
+          coverage: none
+          tools: cs2pr
+      - uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
+      - run: vendor/bin/phpcs --standard=phpcs.xml.dist --report=checkstyle | cs2pr
+
+  version-check:
+    name: Version consistency
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.3'
+          coverage: none
+      - run: php bin/check-version.php
+
+  unit:
+    name: Unit (PHP ${{ matrix.php }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        php: ['8.1', '8.4']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          coverage: none
+      - uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
+      - run: vendor/bin/phpunit --configuration phpunit.xml.dist
+
+  integration:
+    name: Integration (PHP ${{ matrix.php }}, WP ${{ matrix.wp }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - php: '8.1'
+            wp: '6.6.*'
+          - php: '8.4'
+            wp: '7.1.*'
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress_tests
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      WP_TEST_DB_HOST: 127.0.0.1:3306
+      WP_TEST_DB_NAME: wordpress_tests
+      WP_TEST_DB_USER: root
+      WP_TEST_DB_PASSWORD: root
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: ${{ matrix.php }}
+          extensions: mysqli
+          coverage: none
+      - name: Pin WordPress test fixtures to ${{ matrix.wp }}
+        run: composer require --dev --no-update "wp-phpunit/wp-phpunit:${{ matrix.wp }}" "roots/wordpress-no-content:${{ matrix.wp }}"
+      - uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
+        with:
+          dependency-versions: highest
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            mysqladmin ping -h127.0.0.1 -P3306 -uroot -proot --silent && break
+            sleep 2
+          done
+      - name: Integration tests (default)
+        run: vendor/bin/phpunit --configuration phpunit-integration.xml.dist --testsuite integration
+      - name: Integration tests (ajax)
+        run: vendor/bin/phpunit --configuration phpunit-integration.xml.dist --testsuite ajax
+      - name: Integration tests (xmlrpc)
+        run: vendor/bin/phpunit --configuration phpunit-integration.xml.dist --testsuite xmlrpc
+
+  multisite:
+    name: Integration (Multisite)
+    runs-on: ubuntu-latest
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: wordpress_tests
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      WP_TEST_DB_HOST: 127.0.0.1:3306
+      WP_TEST_DB_NAME: wordpress_tests
+      WP_TEST_DB_USER: root
+      WP_TEST_DB_PASSWORD: root
+      WP_MULTISITE: '1'
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.4'
+          extensions: mysqli
+          coverage: none
+      - run: composer require --dev --no-update "wp-phpunit/wp-phpunit:7.1.*" "roots/wordpress-no-content:7.1.*"
+      - uses: ramsey/composer-install@65e4f84970763564f46a70b8a54b90d033b3bdda # 4.0.0
+        with:
+          dependency-versions: highest
+      - name: Wait for MySQL
+        run: |
+          for i in $(seq 1 30); do
+            mysqladmin ping -h127.0.0.1 -P3306 -uroot -proot --silent && break
+            sleep 2
+          done
+      - run: vendor/bin/phpunit --configuration phpunit-integration.xml.dist --testsuite multisite
+
+  dist:
+    name: Distribution archive
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.1'
+          coverage: none
+      - name: Build the release archive the same way `git archive` would ship it
+        run: git archive --format=zip --prefix=deployment-guard/ HEAD -o /tmp/deployment-guard.zip
+      - name: Extract and verify no development files are included
+        run: |
+          mkdir /tmp/dist
+          unzip -q /tmp/deployment-guard.zip -d /tmp/dist
+          test ! -e /tmp/dist/deployment-guard/vendor
+          test ! -e /tmp/dist/deployment-guard/tests
+          test ! -e /tmp/dist/deployment-guard/.github
+          test -e /tmp/dist/deployment-guard/deployment-guard.php
+          test -e /tmp/dist/deployment-guard/src/autoload.php
+      - name: Syntax-check the extracted archive
+        run: find /tmp/dist -name '*.php' -print0 | xargs -0 -n1 php -l
+      - name: Confirm the plugin loads with no vendor/ directory present
+        run: php -l /tmp/dist/deployment-guard/deployment-guard.php
+
+  plugin-check:
+    name: WordPress Plugin Check
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Build the release archive
+        run: git archive --format=zip --prefix=deployment-guard/ HEAD -o /tmp/deployment-guard.zip
+      - run: mkdir -p build && unzip -q /tmp/deployment-guard.zip -d build
+      - uses: wordpress/plugin-check-action@10857da14b6c2246d15402b3e69f777edcf8c12e # v1.1.9
+        with:
+          build-dir: build/deployment-guard

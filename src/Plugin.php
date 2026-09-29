@@ -1,0 +1,89 @@
+<?php
+/**
+ * Composition root.
+ *
+ * @package Digibold\DeploymentGuard
+ */
+
+namespace Digibold\DeploymentGuard;
+
+defined( 'ABSPATH' ) || exit;
+
+/**
+ * Wires together the freeze service, the enforcement layers, the admin
+ * screen, and the WP-CLI command. Kept deliberately thin: no enforcement
+ * logic lives here, only construction and hook registration.
+ */
+final class Plugin {
+
+	public const VERSION = '0.1.0';
+
+	private string $file;
+
+	private FreezeService $service;
+
+	public function __construct( string $file ) {
+		$this->file = $file;
+	}
+
+	public function register(): void {
+		$suspension = new Suspension();
+		$clock      = static fn (): int => time();
+
+		$this->service = new FreezeService( $clock, $suspension );
+
+		$is_cli = defined( 'WP_CLI' ) && WP_CLI;
+		$guard  = new Guard( $this->service, $suspension, $is_cli );
+
+		register_deactivation_hook( $this->file, array( $this, 'on_deactivation' ) );
+
+		add_action( 'admin_init', array( Installer::class, 'maybe_install' ), 0 );
+		add_action( 'admin_init', array( $this, 'register_privacy_policy_content' ) );
+
+		// Enforcement layers that apply in every context (web, CLI, cron).
+		( new Enforcement\CapabilityFilter( $guard ) )->register();
+		( new Enforcement\DataLayerGuard( $guard ) )->register();
+		( new Enforcement\ScheduledPublishGuard( $this->service, $guard ) )->register();
+
+		// Web-only gates. is_admin() also covers admin-ajax.php requests,
+		// which WordPress itself treats as admin context.
+		if ( is_admin() ) {
+			( new Enforcement\AdminGate( $guard ) )->register();
+			( new Enforcement\AjaxGate( $guard ) )->register();
+			( new Admin\SettingsPage( $this->service, $guard ) )->register();
+			( new Admin\Notices( $guard ) )->register();
+		}
+
+		( new Enforcement\RestGate( $guard ) )->register();
+		( new Enforcement\XmlRpcGate( $guard ) )->register();
+
+		if ( $is_cli ) {
+			\WP_CLI::add_command(
+				'deployment-guard',
+				new Cli\Command( $this->service, $guard, $suspension ),
+				array( 'shortdesc' => 'Manage the editorial deployment freeze.' )
+			);
+		}
+	}
+
+	/**
+	 * Clear the freeze on deactivation, so reactivating the plugin later
+	 * never silently restores an old freeze.
+	 */
+	public function on_deactivation(): void {
+		$this->service->reset( 'deactivation' );
+	}
+
+	public function register_privacy_policy_content(): void {
+		if ( ! function_exists( 'wp_add_privacy_policy_content' ) ) {
+			return;
+		}
+
+		$content = '<p class="privacy-policy-tutorial">' . esc_html__(
+			'While Deployment Guard is active, it keeps a short local log of who enabled or disabled it, when scheduled freezes were changed, and which logged-in users attempted to make changes that were blocked. Each entry stores a user ID, a timestamp, and a short description of what was attempted; it never stores page content, form data, or IP addresses. This log stays in your site\'s own database, is never transmitted anywhere, and is limited to a fixed number of entries.',
+			'deployment-guard'
+		) . '</p>';
+
+		wp_add_privacy_policy_content( __( 'Deployment Guard', 'deployment-guard' ), $content );
+	}
+}

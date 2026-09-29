@@ -1,0 +1,49 @@
+# Composer
+/vendor/
+/composer.lock
+
+# WordPress core installed for tests
+/wordpress/
+
+# Test and tooling artifacts
+/.phpunit.result.cache
+/.phpunit.cache/
+/tests/.phpunit.result.cache
+/coverage/
+/build/
+/dist/
+/tmp/
+.phpcs-cache
+*.log
+*.zip
+
+# Local environment and secrets
+.env
+.env.*
+!.env.example
+auth.json
+*.pem
+*.key
+*.p12
+wp-tests-config-local.php
+
+# Node (not used at runtime; ignored in case tooling is added locally)
+node_modules/
+
+# IDE and editor metadata
+.idea/
+.vscode/
+*.sublime-project
+*.sublime-workspace
+.project
+.settings/
+*.swp
+*.swo
+*~
+
+# OS metadata
+.DS_Store
+._*
+Thumbs.db
+ehthumbs.db
+desktop.ini

@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<phpunit xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+	xsi:noNamespaceSchemaLocation="https://schema.phpunit.de/9.6/phpunit.xsd"
+	bootstrap="tests/bootstrap-integration.php"
+	colors="true"
+	convertDeprecationsToExceptions="false"
+	cacheResultFile=".phpunit.cache/integration.result.cache"
+>
+	<testsuites>
+		<testsuite name="integration">
+			<directory>tests/Integration</directory>
+			<exclude>tests/Integration/AjaxGateTest.php</exclude>
+			<exclude>tests/Integration/XmlRpcGateTest.php</exclude>
+			<exclude>tests/Integration/MultisiteTest.php</exclude>
+		</testsuite>
+		<testsuite name="ajax">
+			<file>tests/Integration/AjaxGateTest.php</file>
+		</testsuite>
+		<testsuite name="xmlrpc">
+			<file>tests/Integration/XmlRpcGateTest.php</file>
+		</testsuite>
+		<testsuite name="multisite">
+			<file>tests/Integration/MultisiteTest.php</file>
+		</testsuite>
+	</testsuites>
+</phpunit>
