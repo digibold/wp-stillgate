@@ -1,5 +1,5 @@
 === Deployment Guard ===
-Contributors: linardslazdins
+Contributors: twelvell
 Tags: deployment, migration, maintenance, freeze, editorial
 Requires at least: 6.6
 Tested up to: 7.1
