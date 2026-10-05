@@ -4,7 +4,7 @@ Tags: deployment, migration, maintenance, freeze, editorial
 Requires at least: 6.6
 Tested up to: 7.1
 Requires PHP: 8.1
-Stable tag: 0.1.0
+Stable tag: 0.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
@@ -148,6 +148,20 @@ Admin is always treated as a bypass holder.
 No. Stillgate makes no outbound HTTP requests and has no telemetry.
 Everything it stores stays in your own site's database.
 
+= I installed 0.1.0 as "Deployment Guard". How do I switch to Stillgate? =
+
+Stillgate keeps the earlier release's stored settings, so nothing needs to be
+reconfigured, but both copies share them and only one can run. Install the new
+ZIP without activating it, deactivate Deployment Guard (this ends a freeze that
+is active), activate Stillgate, and then delete the old copy while Stillgate is
+active: Stillgate keeps the freeze configuration, the activity log and every
+role's bypass capability through that deletion. Do not delete the old copy while
+Stillgate is inactive, which erases them. If you activate Stillgate first, it
+stays idle and says so on the Plugins screen until you deactivate the old copy.
+With WP-CLI: `wp plugin install stillgate.zip`, `wp plugin deactivate
+deployment-guard`, `wp plugin activate stillgate`, `wp plugin delete
+deployment-guard`.
+
 = I removed my own bypass capability by mistake. How do I recover? =
 
 WP-CLI (`wp stillgate disable`) and the `DEPLOYMENT_GUARD_FORCE`
@@ -156,11 +170,23 @@ constant in `wp-config.php` both work independently of the
 
 == Changelog ==
 
+= 0.1.1 =
+Renamed from Deployment Guard to Stillgate. The stored settings, activity log
+and bypass capability carry over. The freeze notice now appears only on the
+screens where editing is affected and explains how the freeze ends. See the
+full changelog at
+https://github.com/digibold/wp-stillgate/blob/main/CHANGELOG.md
+
 = 0.1.0 =
 Initial release. See the full changelog at
 https://github.com/digibold/wp-stillgate/blob/main/CHANGELOG.md
 
 == Upgrade Notice ==
+
+= 0.1.1 =
+Renamed from Deployment Guard. If you installed 0.1.0 from GitHub, install this
+version, deactivate Deployment Guard, activate Stillgate, and only then delete
+the old copy; the FAQ has the exact steps. `wp deployment-guard` is now `wp stillgate`.
 
 = 0.1.0 =
 Initial release.

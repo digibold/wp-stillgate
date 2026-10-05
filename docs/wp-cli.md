@@ -7,6 +7,9 @@ wp stillgate disable
 wp stillgate schedule (--start=<datetime> --end=<datetime> | --clear) [--message=<message>]
 ```
 
+Releases up to 0.1.0 registered `wp deployment-guard`; that command no longer
+exists and has no alias.
+
 These are the only commands Stillgate treats specially. Every other
 WP-CLI command — including from other plugins — is subject to the same
 enforcement as any other actor while a freeze is active: see

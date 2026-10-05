@@ -265,6 +265,30 @@ effectively always a bypass holder, on every site. Code that uses
 switched to. Uninstalling pages through every site on the network (100 at a
 time) to remove both options and the bypass capability everywhere.
 
+## The earlier "Deployment Guard" release
+
+Releases up to 0.1.0 were published as Deployment Guard. Stillgate keeps that
+release's namespace, options, capability and hooks, so the two share one set
+of stored state (`LegacyCopy`):
+
+- **Never two at once.** `stillgate.php` stays passive when another copy's
+  classes are already loaded, and `Plugin::register()` ignores a main file
+  that is not this copy's own (an earlier copy that loads after this one
+  resolves the same class by name). Both leave a notice on the Plugins screen,
+  shown only while both are active.
+- **Safe removal of the old copy.** The old release's `uninstall.php` deletes
+  both options and removes the bypass capability from every role, on every
+  site of a network. While Stillgate is running, it remembers that state when
+  `pre_uninstall_plugin` fires for the old copy and fills in whatever was
+  removed on `deleted_plugin` or, for a bare `uninstall_plugin()` call such as
+  `wp plugin uninstall`, at `shutdown`. Nothing is restored unless an
+  uninstall of the old copy was seen, and a value that still exists is never
+  overwritten. If Stillgate is not running when the old copy is deleted, that
+  state is erased, as it always was.
+
+`tests/e2e/migration.sh` runs the real 0.1.0 and current archives through the
+documented sequence for each way of removing the old copy.
+
 ## Known limitations
 
 - **Bypass holders' changes can still be lost.** The freeze prevents

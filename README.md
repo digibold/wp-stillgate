@@ -95,6 +95,49 @@ them (see [docs/architecture.md](docs/architecture.md#suspension)).
 Requires WordPress 6.6+ and PHP 8.1+. No Composer step is needed to run the
 plugin — see [Development](#development).
 
+## Upgrading from Deployment Guard 0.1.0
+
+Stillgate is the new name of Deployment Guard. Version 0.1.1 renames the
+plugin, its folder, text domain and WP-CLI command, but keeps every stored
+identifier — the `deployment_guard_state` and `deployment_guard_history`
+options, the `deployment_guard_bypass` capability, the
+`DEPLOYMENT_GUARD_FORCE` constant and the `deployment_guard_*` hooks — so
+your configuration, activity log and bypass roles carry over. Because both
+versions read and write the same stored data, only one of them can run at a
+time. Switch in this order:
+
+1. Install `stillgate.zip` under Plugins > Add New > Upload Plugin, but do
+   not activate it yet.
+2. Deactivate **Deployment Guard**. Deactivating it ends a freeze that is
+   currently active, as deactivation always does, so switch outside a
+   deployment.
+3. Activate **Stillgate** and check **Tools > Stillgate**.
+4. Delete the old **Deployment Guard** plugin, with Stillgate active.
+
+With WP-CLI:
+
+```bash
+wp plugin install stillgate.zip
+wp plugin deactivate deployment-guard
+wp plugin activate stillgate
+wp plugin delete deployment-guard
+```
+
+Things to know:
+
+- Delete the old copy only while Stillgate is active. The old release's
+  uninstall routine removes the shared options and the bypass capability from
+  every role; Stillgate puts back what it removes, but only when it is
+  running at that moment. Deleting the old copy while Stillgate is inactive
+  erases the freeze configuration, the activity log and the bypass grants.
+- If you activate Stillgate while Deployment Guard is still active, Stillgate
+  does not start and says so on the Plugins screen; the old copy keeps
+  working until you deactivate it, and Stillgate takes over on the next page
+  load with the same settings.
+- `wp deployment-guard …` is now `wp stillgate …` (there is no alias), and
+  the settings screen is **Tools > Stillgate** (`tools.php?page=stillgate`).
+  Update any deploy scripts.
+
 ## Usage
 
 Turn a freeze on or off, or configure a message shown to restricted users,
