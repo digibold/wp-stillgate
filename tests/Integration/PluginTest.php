@@ -31,7 +31,7 @@ final class PluginTest extends TestCase {
 		set_current_screen( 'dashboard' );
 		$this->assertTrue( is_admin() );
 
-		( new Plugin( dirname( __DIR__, 2 ) . '/deployment-guard.php' ) )->register();
+		( new Plugin( dirname( __DIR__, 2 ) . '/stillgate.php' ) )->register();
 
 		$this->assertTrue( $this->has_callback_of( 'admin_notices', Notices::class ) );
 		$this->assertTrue( $this->has_callback_of( 'admin_menu', SettingsPage::class ) );

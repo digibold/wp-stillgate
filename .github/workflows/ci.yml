@@ -208,20 +208,20 @@ jobs:
           php-version: '8.1'
           coverage: none
       - name: Build the release archive the same way `git archive` would ship it
-        run: git archive --format=zip --prefix=deployment-guard/ HEAD -o /tmp/deployment-guard.zip
+        run: git archive --format=zip --prefix=stillgate/ HEAD -o /tmp/stillgate.zip
       - name: Extract and verify no development files are included
         run: |
           mkdir /tmp/dist
-          unzip -q /tmp/deployment-guard.zip -d /tmp/dist
-          test ! -e /tmp/dist/deployment-guard/vendor
-          test ! -e /tmp/dist/deployment-guard/tests
-          test ! -e /tmp/dist/deployment-guard/.github
-          test -e /tmp/dist/deployment-guard/deployment-guard.php
-          test -e /tmp/dist/deployment-guard/src/autoload.php
+          unzip -q /tmp/stillgate.zip -d /tmp/dist
+          test ! -e /tmp/dist/stillgate/vendor
+          test ! -e /tmp/dist/stillgate/tests
+          test ! -e /tmp/dist/stillgate/.github
+          test -e /tmp/dist/stillgate/stillgate.php
+          test -e /tmp/dist/stillgate/src/autoload.php
       - name: Syntax-check the extracted archive
         run: find /tmp/dist -name '*.php' -print0 | xargs -0 -n1 php -l
       - name: Confirm the plugin loads with no vendor/ directory present
-        run: php -l /tmp/dist/deployment-guard/deployment-guard.php
+        run: php -l /tmp/dist/stillgate/stillgate.php
 
   plugin-check:
     name: WordPress Plugin Check
@@ -229,8 +229,8 @@ jobs:
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
       - name: Build the release archive
-        run: git archive --format=zip --prefix=deployment-guard/ HEAD -o /tmp/deployment-guard.zip
-      - run: mkdir -p build && unzip -q /tmp/deployment-guard.zip -d build
+        run: git archive --format=zip --prefix=stillgate/ HEAD -o /tmp/stillgate.zip
+      - run: mkdir -p build && unzip -q /tmp/stillgate.zip -d build
       - uses: wordpress/plugin-check-action@10857da14b6c2246d15402b3e69f777edcf8c12e # v1.1.9
         with:
-          build-dir: build/deployment-guard
+          build-dir: build/stillgate

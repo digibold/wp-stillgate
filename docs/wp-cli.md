@@ -1,18 +1,18 @@
 # WP-CLI reference
 
 ```
-wp deployment-guard status  [--format=<table|json|yaml>]
-wp deployment-guard enable  [--message=<message>]
-wp deployment-guard disable
-wp deployment-guard schedule (--start=<datetime> --end=<datetime> | --clear) [--message=<message>]
+wp stillgate status  [--format=<table|json|yaml>]
+wp stillgate enable  [--message=<message>]
+wp stillgate disable
+wp stillgate schedule (--start=<datetime> --end=<datetime> | --clear) [--message=<message>]
 ```
 
-These are the only commands Deployment Guard treats specially. Every other
+These are the only commands Stillgate treats specially. Every other
 WP-CLI command — including from other plugins — is subject to the same
 enforcement as any other actor while a freeze is active: see
 [architecture.md](architecture.md#wp-cli-is-not-exempt). A command that
 creates, updates, or deletes protected posts, pages, media, or terms exits
-with status `1` and a `Deployment Guard:` message, before anything is
+with status `1` and a `Stillgate:` message, before anything is
 written. Lower-level commands that write post meta, term assignments,
 widgets, menu locations, theme mods, or other options directly are not
 blocked — see [architecture.md](architecture.md#known-limitations).
@@ -26,8 +26,8 @@ hold the bypass capability, and whether a persistent object cache is in
 use.
 
 ```bash
-wp deployment-guard status
-wp deployment-guard status --format=json
+wp stillgate status
+wp stillgate status --format=json
 ```
 
 ## `enable`
@@ -36,8 +36,8 @@ Turns the freeze on immediately, regardless of any schedule. Idempotent:
 running it again while already enabled succeeds with no change.
 
 ```bash
-wp deployment-guard enable
-wp deployment-guard enable --message="Deploying now, back in 10 minutes."
+wp stillgate enable
+wp stillgate enable --message="Deploying now, back in 10 minutes."
 ```
 
 ## `disable`
@@ -45,11 +45,11 @@ wp deployment-guard enable --message="Deploying now, back in 10 minutes."
 Turns the freeze off. If a scheduled window is currently running, it is
 cleared too, so disabling never leaves the freeze active a moment later. A
 window that has not started yet is left in place and a warning is printed
-— run `wp deployment-guard schedule --clear` as well if you want to remove
+— run `wp stillgate schedule --clear` as well if you want to remove
 it entirely.
 
 ```bash
-wp deployment-guard disable
+wp stillgate disable
 ```
 
 ## `schedule`
@@ -66,9 +66,9 @@ Relative phrases (`tomorrow`, `+2 hours`) and bare Unix timestamps are
 rejected deliberately, to keep deployment scripts unambiguous.
 
 ```bash
-wp deployment-guard schedule --start="2026-09-20 22:00" --end="2026-09-21 02:00"
-wp deployment-guard schedule --start=now --end="2026-09-20T04:00:00Z"
-wp deployment-guard schedule --clear
+wp stillgate schedule --start="2026-09-20 22:00" --end="2026-09-21 02:00"
+wp stillgate schedule --start=now --end="2026-09-20T04:00:00Z"
+wp stillgate schedule --clear
 ```
 
 A scheduled window can coexist with the manual switch; the effective rule is
@@ -79,16 +79,16 @@ around your own longer-lived process instead.
 ## Deploy script recipe
 
 ```bash
-wp deployment-guard enable
+wp stillgate enable
 # sync files and database
 wp cache flush
-wp deployment-guard status --format=json   # confirm the state after the import
-wp deployment-guard disable
+wp stillgate status --format=json   # confirm the state after the import
+wp stillgate disable
 ```
 
 `wp cache flush` matters specifically when a persistent object cache is in
 use and web servers do not share it with the process running WP-CLI: see
-[architecture.md](architecture.md#known-limitations). `wp deployment-guard
+[architecture.md](architecture.md#known-limitations). `wp stillgate
 enable`/`disable` warn when this applies.
 
 For a freeze that should self-expire without a second command, prefer
@@ -96,7 +96,7 @@ For a freeze that should self-expire without a second command, prefer
 offset like `+1 hour` (see above); compute the actual timestamp instead:
 
 ```bash
-wp deployment-guard schedule --start=now --end="$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%SZ')"
+wp stillgate schedule --start=now --end="$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%SZ')"
 ```
 
 ## Multisite
@@ -104,14 +104,14 @@ wp deployment-guard schedule --start=now --end="$(date -u -d '+1 hour' '+%Y-%m-%
 Each site's freeze is independent. Target a specific site with `--url`:
 
 ```bash
-wp deployment-guard status --url=example.com
-wp deployment-guard enable --url=site2.example.com
+wp stillgate status --url=example.com
+wp stillgate enable --url=site2.example.com
 ```
 
 To act across every site in the network:
 
 ```bash
-wp site list --field=url | xargs -I% wp deployment-guard status --url=%
+wp site list --field=url | xargs -I% wp stillgate status --url=%
 ```
 
 ## Exit codes
@@ -124,10 +124,10 @@ with a message on stderr, and changes nothing.
 
 ## Recovering when the settings screen is unavailable
 
-Changing the freeze from Tools > Deployment Guard requires both
+Changing the freeze from Tools > Stillgate requires both
 `manage_options` and the `deployment_guard_bypass` capability. If an
 administrator's bypass capability has been removed, these WP-CLI commands
-remain available (they only change Deployment Guard's own state, which the
+remain available (they only change Stillgate's own state, which the
 freeze never locks — see [architecture.md](architecture.md#suspension)), as
 does the `DEPLOYMENT_GUARD_FORCE` constant in `wp-config.php`:
 

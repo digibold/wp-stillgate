@@ -1,7 +1,7 @@
 <?php
 /**
  * A tiny mu-plugin used only by tests/e2e/cli.sh, to prove that an
- * unrelated cron event still runs during a freeze (Deployment Guard must
+ * unrelated cron event still runs during a freeze (Stillgate must
  * never disable WP-Cron itself, only hold back scheduled publication of
  * protected content).
  *

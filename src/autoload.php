@@ -2,7 +2,7 @@
 /**
  * Minimal PSR-4 autoloader for the plugin's own classes.
  *
- * Deployment Guard does not require Composer at runtime. This tiny
+ * Stillgate does not require Composer at runtime. This tiny
  * autoloader lets the plugin ship without a vendor/ directory while still
  * using namespaced, one-class-per-file PHP.
  *

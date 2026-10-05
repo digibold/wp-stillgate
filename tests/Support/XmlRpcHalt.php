@@ -9,7 +9,7 @@
 namespace Digibold\DeploymentGuard\Tests\Support;
 
 /**
- * getCode() carries the IXR_Error fault code (423 for a Deployment Guard
+ * getCode() carries the IXR_Error fault code (423 for a Stillgate
  * block).
  */
 final class XmlRpcHalt extends \Exception {

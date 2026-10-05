@@ -32,7 +32,7 @@ require $wp_phpunit_dir . '/includes/functions.php';
  * creating fixtures.
  */
 function _deployment_guard_tests_load_plugin() {
-	require dirname( __DIR__ ) . '/deployment-guard.php';
+	require dirname( __DIR__ ) . '/stillgate.php';
 }
 tests_add_filter( 'muplugins_loaded', '_deployment_guard_tests_load_plugin' );
 
@@ -42,7 +42,7 @@ tests_add_filter( 'muplugins_loaded', '_deployment_guard_tests_load_plugin' );
  * (for example, calling a translation function before `init`).
  */
 function _deployment_guard_tests_fail_on_doing_it_wrong( $function_name, $message, $version ) {
-	if ( false !== strpos( (string) $message, 'deployment-guard' ) || false !== strpos( (string) $function_name, 'Digibold\\DeploymentGuard' ) ) {
+	if ( false !== strpos( (string) $message, 'stillgate' ) || false !== strpos( (string) $function_name, 'Digibold\\DeploymentGuard' ) ) {
 		throw new \Exception( sprintf( '_doing_it_wrong triggered by the plugin: %s (%s)', $function_name, $message ) );
 	}
 }

@@ -1,6 +1,6 @@
 <?php
 /**
- * Internal suspension mechanism for Deployment Guard's own CLI commands.
+ * Internal suspension mechanism for Stillgate's own CLI commands.
  *
  * @package Digibold\DeploymentGuard
  */
@@ -10,8 +10,8 @@ namespace Digibold\DeploymentGuard;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * A narrowly scoped, in-memory guard that lets Deployment Guard's own
- * `wp deployment-guard` commands run while a freeze is active, without
+ * A narrowly scoped, in-memory guard that lets Stillgate's own
+ * `wp stillgate` commands run while a freeze is active, without
  * becoming a general-purpose bypass for anything else running under
  * WP-CLI.
  *
@@ -26,8 +26,8 @@ defined( 'ABSPATH' ) || exit;
  * nesting depth run() was entered at. A plugin's callback on
  * `updated_option` (fired when a command saves the freeze state), on
  * `shutdown`, or on any other hook runs at least one level deeper, and is
- * evaluated exactly as it would be outside the command. Deployment Guard's
- * own commands only read and write Deployment Guard's own options, which
+ * evaluated exactly as it would be outside the command. Stillgate's
+ * own commands only read and write Stillgate's own options, which
  * no enforcement layer protects, so they need nothing broader than that.
  *
  * @internal

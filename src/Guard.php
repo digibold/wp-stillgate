@@ -15,7 +15,7 @@ defined( 'ABSPATH' ) || exit;
  *
  * Three actor contexts exist: `web` (browser requests, including the
  * block editor and REST calls made from it), `cli` (WP-CLI, any command
- * other than Deployment Guard's own), and `cron` (a WP-Cron event
+ * other than Stillgate's own), and `cron` (a WP-Cron event
  * actually running, including `wp cron event run`). Cron is always
  * restricted, with no bypass and no filter: a bypass capability or an
  * explicit request context is a property of a person taking an action,
@@ -427,14 +427,14 @@ final class Guard {
 	 */
 	public function message_paragraphs(): array {
 		$paragraphs   = array();
-		$paragraphs[] = __( 'Content changes are temporarily locked while a deployment is in progress.', 'deployment-guard' );
+		$paragraphs[] = __( 'Content changes are temporarily locked while a deployment is in progress.', 'stillgate' );
 
 		$ends_at = $this->ends_at();
 
 		if ( null !== $ends_at ) {
 			$paragraphs[] = sprintf(
 				/* translators: %s: date and time editing is expected to resume. */
-				__( 'Editing is expected to resume on %s.', 'deployment-guard' ),
+				__( 'Editing is expected to resume on %s.', 'stillgate' ),
 				$this->format_datetime( $ends_at )
 			);
 		}
@@ -558,7 +558,7 @@ final class Guard {
 	private function format_datetime( int $timestamp ): string {
 		return sprintf(
 			/* translators: 1: date, 2: time */
-			__( '%1$s at %2$s', 'deployment-guard' ),
+			__( '%1$s at %2$s', 'stillgate' ),
 			wp_date( get_option( 'date_format', 'F j, Y' ), $timestamp ),
 			wp_date( get_option( 'time_format', 'g:i a' ), $timestamp )
 		);

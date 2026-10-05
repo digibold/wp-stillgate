@@ -361,8 +361,8 @@ final class AdminGate {
 		$this->guard->report( 'admin', $target );
 
 		wp_die(
-			'<h1>' . esc_html__( 'Editing is temporarily locked', 'deployment-guard' ) . '</h1>' . wp_kses_post( $this->guard->message_html() ),
-			esc_html__( 'Deployment freeze active', 'deployment-guard' ),
+			'<h1>' . esc_html__( 'Editing is temporarily locked', 'stillgate' ) . '</h1>' . wp_kses_post( $this->guard->message_html() ),
+			esc_html__( 'Deployment freeze active', 'stillgate' ),
 			array(
 				'response'  => 423,
 				'back_link' => true,

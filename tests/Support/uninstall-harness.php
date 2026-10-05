@@ -3,7 +3,7 @@
  * Runs uninstall.php the way WordPress does when the plugin is deleted
  * from the Plugins screen: in a request where the plugin itself was never
  * loaded (it has to be deactivated before it can be deleted), so neither
- * deployment-guard.php nor the plugin's autoloader has run. Only the few
+ * stillgate.php nor the plugin's autoloader has run. Only the few
  * WordPress functions the uninstall routine needs are stubbed.
  *
  * Executed as a separate PHP process by tests/Unit/UninstallTest.php;
@@ -13,7 +13,7 @@
  */
 
 define( 'ABSPATH', __DIR__ . '/' );
-define( 'WP_UNINSTALL_PLUGIN', 'deployment-guard/deployment-guard.php' );
+define( 'WP_UNINSTALL_PLUGIN', 'stillgate/stillgate.php' );
 
 $GLOBALS['dg_deleted_options'] = array();
 $GLOBALS['dg_removed_caps']    = array();

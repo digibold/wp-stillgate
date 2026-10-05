@@ -25,7 +25,7 @@ defined( 'ABSPATH' ) || exit;
  * Each denial mirrors the response shape the matching core handler itself
  * uses for a permission failure, so the admin JS that is already prepared
  * to handle a "you can't do that" response displays this one the same
- * way, only with Deployment Guard's own message where the handler would
+ * way, only with Stillgate's own message where the handler would
  * normally show its own.
  *
  * Not every legacy admin-ajax action is listed here individually: several

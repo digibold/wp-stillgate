@@ -1,6 +1,6 @@
 # Architecture
 
-This document describes how Deployment Guard enforces a freeze, and why
+This document describes how Stillgate enforces a freeze, and why
 each mechanism is used. It assumes familiarity with WordPress plugin
 development; for what the plugin does and how to use it, see
 [README.md](../README.md).
@@ -12,7 +12,7 @@ Plugin (bootstrap)
  ├─ FreezeService ── owns deployment_guard_state / deployment_guard_history
  │    └─ History     (bounded, deduplicated, throttled log)
  ├─ Guard ── restriction policy: who is affected, and by what
- ├─ Suspension ── narrow internal guard for Deployment Guard's own CLI commands
+ ├─ Suspension ── narrow internal guard for Stillgate's own CLI commands
  └─ Enforcement layers, overlapping on purpose:
       ├─ CapabilityFilter  (map_meta_cap — every context)
       ├─ AdminGate         (classic wp-admin screens — web)
@@ -34,7 +34,7 @@ values:
 
 - **`web`** — a browser request: classic wp-admin, the block editor, REST
   calls the editor itself makes, XML-RPC.
-- **`cli`** — WP-CLI, running any command other than Deployment Guard's own
+- **`cli`** — WP-CLI, running any command other than Stillgate's own
   (see [Suspension](#suspension)).
 - **`cron`** — a WP-Cron event actually running, including `wp cron event
   run`, which core marks the same way (`DOING_CRON`) a web-triggered
@@ -170,7 +170,7 @@ has no identity, and nothing can bypass it.
 
 ## WP-CLI is not exempt
 
-Every WP-CLI command other than `wp deployment-guard` itself is treated as
+Every WP-CLI command other than `wp stillgate` itself is treated as
 `cli` context: `wp post update`, `wp post delete`, `wp term create`, `wp
 media import`, and the equivalent commands from third-party plugins are
 all subject to `CapabilityFilter` and `DataLayerGuard` exactly like any
@@ -182,8 +182,8 @@ assignments, or options directly are not blocked; see
 
 ## Suspension
 
-Deployment Guard's own `status`/`enable`/`disable`/`schedule` commands only
-read and write Deployment Guard's own two options, which no enforcement
+Stillgate's own `status`/`enable`/`disable`/`schedule` commands only
+read and write Stillgate's own two options, which no enforcement
 layer protects, so they keep working during a freeze without anything
 being relaxed for them. They still run inside `Suspension::run()`, a
 narrowly scoped internal guard, built so that the most it could ever
@@ -247,7 +247,7 @@ IP address, or message body.
 
 ## Multisite
 
-Deployment Guard operates per site. Activation installs only the site being
+Stillgate operates per site. Activation installs only the site being
 activated; a Multisite network's other sites install themselves lazily
 (`Installer::maybe_install()`, cheap enough to run on every `admin_init`
 and before every state-changing call) the first time an administrator
@@ -259,7 +259,7 @@ there.
 A Super Admin is treated exactly like any other bypass-capability check:
 `map_meta_cap` itself denies them only via an explicit `do_not_allow`, and
 WordPress core short-circuits everything else for a Super Admin before
-Deployment Guard's filter even has a chance to run — so a Super Admin is
+Stillgate's filter even has a chance to run — so a Super Admin is
 effectively always a bypass holder, on every site. Code that uses
 `switch_to_blog()` is enforced against the freeze state of the site it
 switched to. Uninstalling pages through every site on the network (100 at a

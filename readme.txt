@@ -1,4 +1,4 @@
-=== Deployment Guard ===
+=== Stillgate — Editorial Freeze for Deployments ===
 Contributors: twelvell
 Tags: deployment, migration, maintenance, freeze, editorial
 Requires at least: 6.6
@@ -15,7 +15,7 @@ Locks editorial changes during deployments and migrations while the public front
 Deploying a WordPress site — syncing a database, pushing files, running a
 migration — usually needs a window where the database will not change
 underneath you. In practice, editors keep working, and a post, upload, or
-menu change made mid-sync can be silently lost. Deployment Guard puts the
+menu change made mid-sync can be silently lost. Stillgate puts the
 *backend* into a controlled editorial freeze during that window, while the
 public frontend keeps working normally the whole time.
 
@@ -48,13 +48,13 @@ proceeds concurrently; the freeze protects everyone *else's* content.
 **WP-CLI is not exempt.** `wp post update`, `wp term create`, `wp media
 import`, and equivalent commands from other plugins are blocked the same
 way during a freeze; `--user=<account with bypass>` is the explicit way to
-act as a specific person from the command line. Deployment Guard's own `wp
-deployment-guard status|enable|disable|schedule` commands keep working,
-because they only change Deployment Guard's own state.
+act as a specific person from the command line. Stillgate's own `wp
+stillgate status|enable|disable|schedule` commands keep working,
+because they only change Stillgate's own state.
 
 **Security and privacy**
 
-Deployment Guard makes no outbound HTTP requests, sends no data to any
+Stillgate makes no outbound HTTP requests, sends no data to any
 external service, requires no account or license key, and collects no
 telemetry. It uses no custom database table — two options, both removed on
 uninstall — and its small internal activity log never stores request
@@ -94,29 +94,29 @@ payloads, message bodies, or IP addresses.
   affects the current site's state only.
 
 Full architecture notes, the complete enforcement matrix, and every hook
-this plugin exposes are documented in the [GitHub repository](https://github.com/digibold/wp-deployment-guard).
+this plugin exposes are documented in the [GitHub repository](https://github.com/digibold/wp-stillgate).
 
 == Installation ==
 
-1. Upload the plugin files to `/wp-content/plugins/deployment-guard`, or
+1. Upload the plugin files to `/wp-content/plugins/stillgate`, or
    install it through Plugins > Add New > Upload Plugin.
 2. Activate the plugin. Roles with `manage_options` receive the
    `deployment_guard_bypass` capability automatically.
-3. Go to Tools > Deployment Guard to configure a freeze, or use WP-CLI:
-   `wp deployment-guard enable`.
+3. Go to Tools > Stillgate to configure a freeze, or use WP-CLI:
+   `wp stillgate enable`.
 
 == Frequently Asked Questions ==
 
 = Will this stop the public site from working? =
 
-No. Deployment Guard only restricts editorial *writes* from logged-in
+No. Stillgate only restricts editorial *writes* from logged-in
 users without the bypass capability. Anonymous visitors, logged-in
 customers, comment submissions, and every other frontend read or write
 that is not editorial content stay unaffected.
 
 = Does this protect against database changes made outside WordPress? =
 
-No. Deployment Guard enforces its freeze through WordPress's own request
+No. Stillgate enforces its freeze through WordPress's own request
 handling (admin screens, REST, XML-RPC, WP-CLI, WP-Cron), capability
 checks, and content functions. A direct database edit, a raw SQL script,
 or a completely separate application writing to the same database is
@@ -127,8 +127,8 @@ outside anything a WordPress plugin can see or prevent.
 No. Commands that create, update, or delete protected posts, pages, media,
 and terms are blocked and exit with an error. Lower-level commands that
 write post meta, term assignments, widgets, menu locations, theme mods, or
-other options directly are not blocked. Deployment Guard's own `wp
-deployment-guard` commands keep working because they only change the
+other options directly are not blocked. Stillgate's own `wp
+stillgate` commands keep working because they only change the
 freeze state itself.
 
 = What happens to scheduled (future-dated) posts during a freeze? =
@@ -145,12 +145,12 @@ Admin is always treated as a bypass holder.
 
 = Does this send any data anywhere? =
 
-No. Deployment Guard makes no outbound HTTP requests and has no telemetry.
+No. Stillgate makes no outbound HTTP requests and has no telemetry.
 Everything it stores stays in your own site's database.
 
 = I removed my own bypass capability by mistake. How do I recover? =
 
-WP-CLI (`wp deployment-guard disable`) and the `DEPLOYMENT_GUARD_FORCE`
+WP-CLI (`wp stillgate disable`) and the `DEPLOYMENT_GUARD_FORCE`
 constant in `wp-config.php` both work independently of the
 `deployment_guard_bypass` capability.
 
@@ -158,7 +158,7 @@ constant in `wp-config.php` both work independently of the
 
 = 0.1.0 =
 Initial release. See the full changelog at
-https://github.com/digibold/wp-deployment-guard/blob/main/CHANGELOG.md
+https://github.com/digibold/wp-stillgate/blob/main/CHANGELOG.md
 
 == Upgrade Notice ==
 

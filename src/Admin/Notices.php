@@ -15,7 +15,7 @@ defined( 'ABSPATH' ) || exit;
 /**
  * Shows a visible but professional notice on classic wp-admin screens,
  * and an equivalent notice inside the block editor, whenever a freeze is
- * active. Explains that Deployment Guard is active, when it is expected
+ * active. Explains that Stillgate is active, when it is expected
  * to end (if scheduled), the operator's own message, and whether the
  * current user can bypass it — so a restricted user understands why
  * editing is unavailable, rather than encountering it as a confusing
@@ -45,7 +45,7 @@ final class Notices {
 
 		$screen = get_current_screen();
 
-		if ( $screen && ( $screen->is_block_editor() || 'tools_page_deployment-guard' === $screen->id ) ) {
+		if ( $screen && ( $screen->is_block_editor() || 'tools_page_stillgate' === $screen->id ) ) {
 			return;
 		}
 
@@ -62,8 +62,8 @@ final class Notices {
 		}
 
 		$html .= '<p>' . ( $can_bypass
-			? esc_html__( 'You can continue editing, but your changes may still be lost if a deployment or migration proceeds.', 'deployment-guard' )
-			: esc_html__( 'Editing is unavailable to your account until the freeze ends.', 'deployment-guard' ) )
+			? esc_html__( 'You can continue editing, but your changes may still be lost if a deployment or migration proceeds.', 'stillgate' )
+			: esc_html__( 'Editing is unavailable to your account until the freeze ends.', 'stillgate' ) )
 			. '</p>';
 
 		wp_admin_notice(
@@ -108,12 +108,12 @@ final class Notices {
 
 		$message = implode( ' ', $this->guard->message_paragraphs() );
 
-		wp_register_script( 'deployment-guard-editor-notice', false, array( 'wp-data', 'wp-notices' ), Plugin::VERSION, true );
-		wp_enqueue_script( 'deployment-guard-editor-notice' );
+		wp_register_script( 'stillgate-editor-notice', false, array( 'wp-data', 'wp-notices' ), Plugin::VERSION, true );
+		wp_enqueue_script( 'stillgate-editor-notice' );
 
 		wp_add_inline_script(
-			'deployment-guard-editor-notice',
-			'wp.data.dispatch("core/notices").createNotice("warning",' . wp_json_encode( $message ) . ',{id:"deployment-guard-freeze",isDismissible:false});'
+			'stillgate-editor-notice',
+			'wp.data.dispatch("core/notices").createNotice("warning",' . wp_json_encode( $message ) . ',{id:"stillgate-freeze",isDismissible:false});'
 		);
 	}
 }

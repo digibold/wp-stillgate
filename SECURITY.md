@@ -6,7 +6,7 @@
 | ------- | --------- |
 | 0.1.x   | Yes       |
 
-Deployment Guard is at an early `0.x` stage. Until a `1.0` release, only the
+Stillgate is at an early `0.x` stage. Until a `1.0` release, only the
 latest `0.1.x` release is supported with security fixes.
 
 ## Reporting a vulnerability

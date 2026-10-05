@@ -1,4 +1,4 @@
-# Contributing to Deployment Guard
+# Contributing to Stillgate
 
 Thanks for considering a contribution. This document covers how to get a
 development environment running, the checks a change is expected to pass,
@@ -23,14 +23,14 @@ local port for PHP's built-in web server are only needed for the optional
 end-to-end suite (`composer test:e2e`), which is not run in CI.
 
 ```bash
-git clone https://github.com/digibold/wp-deployment-guard.git
-cd wp-deployment-guard
+git clone https://github.com/digibold/wp-stillgate.git
+cd wp-stillgate
 composer install
 ```
 
 `composer install` pulls in a private copy of WordPress core
 (`roots/wordpress-no-content`) for the test suite; it is not part of the
-distributed plugin and is not required to install or run Deployment Guard on
+distributed plugin and is not required to install or run Stillgate on
 a real site. The plugin itself has no runtime Composer dependency — see
 [docs/architecture.md](docs/architecture.md).
 
@@ -47,7 +47,7 @@ export WP_TEST_DB_HOST=127.0.0.1
 A throwaway MySQL container is usually the quickest way to get one:
 
 ```bash
-docker run -d --name deployment-guard-mysql \
+docker run -d --name stillgate-mysql \
   -e MYSQL_ROOT_PASSWORD=root -e MYSQL_DATABASE=wordpress_tests \
   -p 127.0.0.1:3306:3306 mysql:8.4
 ```
@@ -78,7 +78,7 @@ locally first.
   class per file, autoloaded by `src/autoload.php`. The plugin does not load
   Composer's autoloader at runtime, so any new class must resolve through
   that autoloader — `AutoloaderTest` checks this.
-- Every user-facing string must be translatable, using the `deployment-guard`
+- Every user-facing string must be translatable, using the `stillgate`
   text domain.
 - Sanitize input, escape output, verify nonces and capabilities, and prefer
   the WordPress APIs already used elsewhere in the codebase over new direct

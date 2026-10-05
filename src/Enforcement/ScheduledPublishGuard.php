@@ -17,7 +17,7 @@ defined( 'ABSPATH' ) || exit;
  * transitioning to "publish" while a freeze is active, without touching
  * WP-Cron itself or any other scheduled event.
  *
- * Deployment Guard's purpose is to stop protected content from changing
+ * Stillgate's purpose is to stop protected content from changing
  * in the database during a deployment; core's own `publish_future_post`
  * cron event does exactly that, on a timer, independent of any user or
  * capability. Nothing else in this plugin can intercept it: it runs as

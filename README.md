@@ -1,6 +1,6 @@
-# Deployment Guard
+# Stillgate — Editorial Freeze for Deployments
 
-Deployment Guard protects production WordPress installations during
+Stillgate protects production WordPress installations during
 migrations, deployments, and maintenance windows.
 
 ## The problem
@@ -13,7 +13,7 @@ that is about to be replaced, a menu edit can vanish. The frontend, though,
 should generally stay up the whole time — visitors, customers checking out,
 and anyone submitting a form still need the site to work.
 
-Deployment Guard puts the *backend* into a controlled editorial freeze —
+Stillgate puts the *backend* into a controlled editorial freeze —
 locking content changes — while leaving the public frontend completely
 untouched.
 
@@ -50,7 +50,7 @@ revisions, public taxonomies, navigation menus, widgets, the Customizer,
 and the Site Editor (templates, template parts, global styles, navigation,
 synced patterns, fonts). The exact effective list — which depends on what
 is registered on your site — is shown on the settings screen and in `wp
-deployment-guard status`, and can be narrowed with the
+stillgate status`, and can be narrowed with the
 [`deployment_guard_protected_types`](docs/hooks.md) filter.
 
 **Scheduled posts of a protected type do not publish while a freeze is
@@ -78,18 +78,18 @@ edits. Super Admins on Multisite are always treated as bypass holders.
 import`, and equivalent commands from other plugins are blocked the same
 way while a freeze is active. `--user=<account with bypass>` is the
 explicit, intentional way to make a change from the command line during a
-freeze — the same identity-based bypass as on the web. Deployment Guard's
-own `wp deployment-guard` commands keep working during a freeze because
-they only change Deployment Guard's own state; nothing is exempted for
+freeze — the same identity-based bypass as on the web. Stillgate's
+own `wp stillgate` commands keep working during a freeze because
+they only change Stillgate's own state; nothing is exempted for
 them (see [docs/architecture.md](docs/architecture.md#suspension)).
 
 ## Installation
 
-1. Upload the plugin to `/wp-content/plugins/deployment-guard`, or install
+1. Upload the plugin to `/wp-content/plugins/stillgate`, or install
    the zip through Plugins > Add New > Upload Plugin.
 2. Activate it. Roles with `manage_options` (Administrator, by default)
    receive the `deployment_guard_bypass` capability automatically.
-3. Configure it under **Tools > Deployment Guard**, or with WP-CLI (see
+3. Configure it under **Tools > Stillgate**, or with WP-CLI (see
    below).
 
 Requires WordPress 6.6+ and PHP 8.1+. No Composer step is needed to run the
@@ -98,7 +98,7 @@ plugin — see [Development](#development).
 ## Usage
 
 Turn a freeze on or off, or configure a message shown to restricted users,
-from **Tools > Deployment Guard**. The screen shows current status, whether
+from **Tools > Stillgate**. The screen shows current status, whether
 your own account can bypass the freeze, which roles hold the bypass
 capability, and the effective list of protected content. Enabling a freeze
 requires an explicit confirmation checkbox.
@@ -118,10 +118,10 @@ window can coexist; the effective rule is "active if either says so".
 ### WP-CLI
 
 ```bash
-wp deployment-guard status
-wp deployment-guard enable --message="Deploying now, back in 10 minutes."
-wp deployment-guard schedule --start="2026-09-20 22:00" --end="2026-09-21 02:00"
-wp deployment-guard disable
+wp stillgate status
+wp stillgate enable --message="Deploying now, back in 10 minutes."
+wp stillgate schedule --start="2026-09-20 22:00" --end="2026-09-21 02:00"
+wp stillgate disable
 ```
 
 Full reference, including a deploy script recipe and Multisite usage, in
@@ -156,7 +156,7 @@ and `pingback.ping` are unaffected.
 
 ## Multisite behavior
 
-Deployment Guard operates per site in `0.1.0` — there is no network-wide
+Stillgate operates per site in `0.1.0` — there is no network-wide
 freeze screen. Each site's freeze is configured, and enforced,
 independently; a Super Admin is always treated as a bypass holder, on every
 site. See [docs/architecture.md](docs/architecture.md#multisite) for
@@ -209,7 +209,7 @@ than opening a public issue.
 
 ## Privacy and telemetry
 
-Deployment Guard makes **no outbound HTTP requests** and sends **no data to
+Stillgate makes **no outbound HTTP requests** and sends **no data to
 any external service**. It requires no external account, license key, or
 cloud service. Its activity log is a bounded local option, described to
 site owners through WordPress's own Privacy Policy content mechanism, and
@@ -217,7 +217,7 @@ is deleted entirely on uninstall.
 
 ## Development
 
-Deployment Guard has **no runtime Composer dependency** — a
+Stillgate has **no runtime Composer dependency** — a
 `git archive`/zip of the repository runs on its own, with its own tiny
 PSR-4 autoloader (`src/autoload.php`), because the distributed plugin never
 requires site owners to run Composer. Composer is only used for

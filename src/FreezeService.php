@@ -285,35 +285,35 @@ final class FreezeService {
 	public static function error_text( string $code ): string {
 		switch ( $code ) {
 			case 'invalid_format':
-				return __( 'That date could not be understood. Use the format YYYY-MM-DD HH:MM.', 'deployment-guard' );
+				return __( 'That date could not be understood. Use the format YYYY-MM-DD HH:MM.', 'stillgate' );
 			case 'nonexistent_local_time':
-				return __( 'That local time does not exist, likely because of a daylight-saving change. Choose a different time.', 'deployment-guard' );
+				return __( 'That local time does not exist, likely because of a daylight-saving change. Choose a different time.', 'stillgate' );
 			case 'end_not_after_start':
-				return __( 'The end date must be after the start date.', 'deployment-guard' );
+				return __( 'The end date must be after the start date.', 'stillgate' );
 			case 'end_in_past':
-				return __( 'The end date must be in the future.', 'deployment-guard' );
+				return __( 'The end date must be in the future.', 'stillgate' );
 			case 'window_too_long':
 				return sprintf(
 					/* translators: %d: maximum number of days a scheduled freeze window may span. */
-					__( 'The scheduled window cannot be longer than %d days.', 'deployment-guard' ),
+					__( 'The scheduled window cannot be longer than %d days.', 'stillgate' ),
 					(int) ( FreezeConfig::MAX_WINDOW_SECONDS / DAY_IN_SECONDS )
 				);
 			case 'start_too_far':
 				return sprintf(
 					/* translators: %d: maximum number of days a scheduled start may lie in the future. */
-					__( 'The start date cannot be more than %d days from now.', 'deployment-guard' ),
+					__( 'The start date cannot be more than %d days from now.', 'stillgate' ),
 					(int) ( FreezeConfig::MAX_START_LEAD_SECONDS / DAY_IN_SECONDS )
 				);
 			case 'message_too_long':
 				return sprintf(
 					/* translators: %d: maximum message length in characters. */
-					__( 'The message cannot be longer than %d characters.', 'deployment-guard' ),
+					__( 'The message cannot be longer than %d characters.', 'stillgate' ),
 					FreezeConfig::MAX_MESSAGE_LENGTH
 				);
 			case 'confirmation_required':
-				return __( 'Please check the confirmation box to continue.', 'deployment-guard' );
+				return __( 'Please check the confirmation box to continue.', 'stillgate' );
 			default:
-				return __( 'The request could not be completed.', 'deployment-guard' );
+				return __( 'The request could not be completed.', 'stillgate' );
 		}
 	}
 

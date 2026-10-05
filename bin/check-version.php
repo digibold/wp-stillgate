@@ -37,7 +37,7 @@ function extract_or_fail( string $label, string $file, string $pattern ): string
 
 $header_version = extract_or_fail(
 	'the Version header',
-	"$root/deployment-guard.php",
+	"$root/stillgate.php",
 	'/^\s*\*\s*Version:\s*([0-9][0-9A-Za-z.\-]*)\s*$/m'
 );
 
@@ -60,7 +60,7 @@ $changelog_version = extract_or_fail(
 );
 
 $found = array(
-	'deployment-guard.php Version header' => $header_version,
+	'stillgate.php Version header' => $header_version,
 	'readme.txt Stable tag'               => $stable_tag,
 	'Plugin::VERSION'                     => $class_version,
 	'CHANGELOG.md top entry'              => $changelog_version,

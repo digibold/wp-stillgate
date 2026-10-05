@@ -1,5 +1,5 @@
 {
-	"name": "digibold/wp-deployment-guard",
+	"name": "digibold/wp-stillgate",
 	"description": "Editorial freeze for WordPress during deployments, migrations and maintenance windows.",
 	"type": "wordpress-plugin",
 	"license": "GPL-2.0-or-later",
@@ -10,7 +10,7 @@
 		"migration",
 		"content-freeze"
 	],
-	"homepage": "https://github.com/digibold/wp-deployment-guard",
+	"homepage": "https://github.com/digibold/wp-stillgate",
 	"authors": [
 		{
 			"name": "Linards Lazdins",
@@ -18,9 +18,9 @@
 		}
 	],
 	"support": {
-		"issues": "https://github.com/digibold/wp-deployment-guard/issues",
-		"source": "https://github.com/digibold/wp-deployment-guard",
-		"security": "https://github.com/digibold/wp-deployment-guard/blob/main/SECURITY.md"
+		"issues": "https://github.com/digibold/wp-stillgate/issues",
+		"source": "https://github.com/digibold/wp-stillgate",
+		"security": "https://github.com/digibold/wp-stillgate/blob/main/SECURITY.md"
 	},
 	"require": {
 		"php": "^8.1"

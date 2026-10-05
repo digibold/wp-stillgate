@@ -1,6 +1,6 @@
 # Extensibility hooks
 
-Deployment Guard exposes a small, deliberately narrow set of hooks. Most
+Stillgate exposes a small, deliberately narrow set of hooks. Most
 sites will never need any of these; they exist for the cases a filter on
 protected types or a plugin with its own write paths cannot otherwise be
 accommodated.
@@ -42,9 +42,9 @@ apply_filters( 'deployment_guard_is_restricted', bool $restricted, int $user_id,
 Fires only while a freeze is active, and only for the `web` and `cli`
 contexts (never for `cron`: see [architecture.md](architecture.md#actor-contexts)
 for why cron cannot be exempted). `$restricted` is the capability-based
-answer already computed by Deployment Guard; `$context` is `'web'` or
+answer already computed by Stillgate; `$context` is `'web'` or
 `'cli'`. Return `false` to exempt this specific actor, or `true` to
-additionally restrict someone Deployment Guard would not otherwise have
+additionally restrict someone Stillgate would not otherwise have
 restricted. The result is remembered for the rest of the request, per
 site, user, and context.
 
@@ -54,12 +54,12 @@ site, user, and context.
 apply_filters( 'deployment_guard_rest_is_protected', bool $protected, WP_REST_Request $request, array $handler );
 ```
 
-Fires for every REST write request Deployment Guard has matched to a
+Fires for every REST write request Stillgate has matched to a
 target. `$handler` is the matched route's handler array (see
 `WP_REST_Server::dispatch()`). Return `false` to let a specific route
-through regardless of Deployment Guard's own resolution.
+through regardless of Stillgate's own resolution.
 
-A route whose controller Deployment Guard does not recognize at all (a
+A route whose controller Stillgate does not recognize at all (a
 plugin's own controller class that is neither a registered post type's or
 taxonomy's controller nor an instance of a core content controller) never
 reaches this filter; see
@@ -91,9 +91,9 @@ deactivation). `$new` and `$old` are the state array shape
 `schedule_end`, `message`, `updated_at`, `updated_by`, each a scalar or
 `null`. `$source` is `'ui'`, `'cli'`, or `'deactivation'`.
 
-A listener never inherits Deployment Guard's own internal CLI suspension
+A listener never inherits Stillgate's own internal CLI suspension
 (see [architecture.md](architecture.md#suspension)) — neither does any other
-hook callback that runs while a `wp deployment-guard` command is executing —
+hook callback that runs while a `wp stillgate` command is executing —
 so a listener that itself tries to write protected content while a freeze
 is active is still subject to normal enforcement. It is not an escape hatch
-for `wp deployment-guard enable` to also perform an unrelated write.
+for `wp stillgate enable` to also perform an unrelated write.

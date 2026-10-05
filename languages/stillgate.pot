@@ -2,8 +2,8 @@
 # This file is distributed under the GPL-2.0-or-later.
 msgid ""
 msgstr ""
-"Project-Id-Version: Deployment Guard 0.1.0\n"
-"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/deployment-guard\n"
+"Project-Id-Version: Stillgate 0.1.0\n"
+"Report-Msgid-Bugs-To: https://wordpress.org/support/plugin/stillgate\n"
 "Last-Translator: FULL NAME <EMAIL@ADDRESS>\n"
 "Language-Team: LANGUAGE <LL@li.org>\n"
 "MIME-Version: 1.0\n"
@@ -12,34 +12,34 @@ msgstr ""
 "POT-Creation-Date: 2026-10-04T18:52:04+00:00\n"
 "PO-Revision-Date: YEAR-MO-DA HO:MI+ZONE\n"
 "X-Generator: WP-CLI 2.12.0\n"
-"X-Domain: deployment-guard\n"
+"X-Domain: stillgate\n"
 
 #. Plugin Name of the plugin
-#: deployment-guard.php
+#: stillgate.php
 #: src/Admin/SettingsPage.php:53
 #: src/Admin/SettingsPage.php:54
 #: src/Admin/SettingsPage.php:189
 #: src/Plugin.php:87
-msgid "Deployment Guard"
+msgid "Stillgate"
 msgstr ""
 
 #. Plugin URI of the plugin
-#: deployment-guard.php
-msgid "https://github.com/digibold/wp-deployment-guard"
+#: stillgate.php
+msgid "https://github.com/digibold/wp-stillgate"
 msgstr ""
 
 #. Description of the plugin
-#: deployment-guard.php
+#: stillgate.php
 msgid "Locks editorial changes during deployments and migrations while the site stays online."
 msgstr ""
 
 #. Author of the plugin
-#: deployment-guard.php
+#: stillgate.php
 msgid "Linards Lazdins"
 msgstr ""
 
 #. Author URI of the plugin
-#: deployment-guard.php
+#: stillgate.php
 msgid "https://createit.lv"
 msgstr ""
 
@@ -52,12 +52,12 @@ msgid "Editing is unavailable to your account until the freeze ends."
 msgstr ""
 
 #: src/Admin/SettingsPage.php:93
-msgid "Sorry, you are not allowed to change Deployment Guard settings."
+msgid "Sorry, you are not allowed to change Stillgate settings."
 msgstr ""
 
 #: src/Admin/SettingsPage.php:103
 #: src/Admin/SettingsPage.php:150
-msgid "Unknown Deployment Guard action."
+msgid "Unknown Stillgate action."
 msgstr ""
 
 #: src/Admin/SettingsPage.php:180
@@ -73,11 +73,11 @@ msgid "Ask an administrator to grant it to your role, use WP-CLI, or set the DEP
 msgstr ""
 
 #: src/Admin/SettingsPage.php:228
-msgid "Deployment Guard is now active."
+msgid "Stillgate is now active."
 msgstr ""
 
 #: src/Admin/SettingsPage.php:230
-msgid "Deployment Guard is now inactive."
+msgid "Stillgate is now inactive."
 msgstr ""
 
 #: src/Admin/SettingsPage.php:232
@@ -182,7 +182,7 @@ msgid "What a freeze does"
 msgstr ""
 
 #: src/Admin/SettingsPage.php:299
-msgid "While active, users without the \"Bypass Deployment Guard\" capability cannot create, edit, delete, or restore content of a protected type; cannot manage protected taxonomies, menus, widgets, or Customizer settings; and cannot use the Site Editor. Scheduled posts of a protected type do not publish while the freeze is active — they remain scheduled and publish normally once it ends."
+msgid "While active, users without the \"Bypass Stillgate\" capability cannot create, edit, delete, or restore content of a protected type; cannot manage protected taxonomies, menus, widgets, or Customizer settings; and cannot use the Site Editor. Scheduled posts of a protected type do not publish while the freeze is active — they remain scheduled and publish normally once it ends."
 msgstr ""
 
 #: src/Admin/SettingsPage.php:300
@@ -313,7 +313,7 @@ msgid "No activity recorded yet."
 msgstr ""
 
 #: src/Admin/SettingsPage.php:477
-msgid "Deployment Guard activity log"
+msgid "Stillgate activity log"
 msgstr ""
 
 #: src/Admin/SettingsPage.php:479
@@ -385,7 +385,7 @@ msgstr ""
 #. translators: %s: the reason the write was blocked.
 #: src/Enforcement/DataLayerGuard.php:330
 #, php-format
-msgid "Deployment Guard: %s"
+msgid "Stillgate: %s"
 msgstr ""
 
 #: src/FreezeService.php:288
@@ -441,5 +441,5 @@ msgid "Editing is expected to resume on %s."
 msgstr ""
 
 #: src/Plugin.php:82
-msgid "While Deployment Guard is active, it keeps a short local log of who enabled or disabled it, when scheduled freezes were changed, and which logged-in users attempted to make changes that were blocked. Each entry stores a user ID, a timestamp, and a short description of what was attempted; it never stores page content, form data, or IP addresses. This log stays in your site's own database, is never transmitted anywhere, and is limited to a fixed number of entries."
+msgid "While Stillgate is active, it keeps a short local log of who enabled or disabled it, when scheduled freezes were changed, and which logged-in users attempted to make changes that were blocked. Each entry stores a user ID, a timestamp, and a short description of what was attempted; it never stores page content, form data, or IP addresses. This log stays in your site's own database, is never transmitted anywhere, and is limited to a fixed number of entries."
 msgstr ""

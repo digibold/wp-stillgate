@@ -1,6 +1,6 @@
 <?php
 /**
- * WP-CLI command: wp deployment-guard.
+ * WP-CLI command: wp stillgate.
  *
  * @package Digibold\DeploymentGuard
  */
@@ -16,7 +16,7 @@ use Digibold\DeploymentGuard\Suspension;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Manages the Deployment Guard editorial freeze from the command line.
+ * Manages the Stillgate editorial freeze from the command line.
  *
  * Every subcommand's body runs inside Suspension::run(), the narrowly
  * scoped mechanism described on the Suspension class: it lets these
@@ -59,8 +59,8 @@ final class Command {
 	 *
 	 * ## EXAMPLES
 	 *
-	 *     wp deployment-guard status
-	 *     wp deployment-guard status --format=json
+	 *     wp stillgate status
+	 *     wp stillgate status --format=json
 	 *
 	 * @param string[]             $args
 	 * @param array<string, mixed> $assoc_args
@@ -83,8 +83,8 @@ final class Command {
 	 *
 	 * ## EXAMPLES
 	 *
-	 *     wp deployment-guard enable
-	 *     wp deployment-guard enable --message="Deploying now, back in 10 minutes."
+	 *     wp stillgate enable
+	 *     wp stillgate enable --message="Deploying now, back in 10 minutes."
 	 *
 	 * @param string[]             $args
 	 * @param array<string, mixed> $assoc_args
@@ -94,7 +94,7 @@ final class Command {
 			function () use ( $assoc_args ): void {
 				$result = $this->service->enable( 'cli' );
 
-				\WP_CLI::success( 'unchanged' === $result ? 'The freeze was already on.' : 'Deployment Guard is now active.' );
+				\WP_CLI::success( 'unchanged' === $result ? 'The freeze was already on.' : 'Stillgate is now active.' );
 
 				$this->maybe_set_message( $assoc_args );
 				$this->maybe_warn_forced();
@@ -113,7 +113,7 @@ final class Command {
 	 *
 	 * ## EXAMPLES
 	 *
-	 *     wp deployment-guard disable
+	 *     wp stillgate disable
 	 *
 	 * @param string[]             $args
 	 * @param array<string, mixed> $assoc_args
@@ -123,14 +123,14 @@ final class Command {
 			function (): void {
 				$result = $this->service->disable( 'cli' );
 
-				\WP_CLI::success( 'unchanged' === $result ? 'The freeze was already off.' : 'Deployment Guard is now inactive.' );
+				\WP_CLI::success( 'unchanged' === $result ? 'The freeze was already off.' : 'Stillgate is now inactive.' );
 
 				$config = $this->service->config();
 
 				if ( null !== $config->schedule_start ) {
 					\WP_CLI::warning(
 						sprintf(
-							'An upcoming scheduled freeze remains configured (starts %s). Run "wp deployment-guard schedule --clear" to remove it.',
+							'An upcoming scheduled freeze remains configured (starts %s). Run "wp stillgate schedule --clear" to remove it.',
 							gmdate( 'c', $config->schedule_start )
 						)
 					);
@@ -165,8 +165,8 @@ final class Command {
 	 *
 	 * ## EXAMPLES
 	 *
-	 *     wp deployment-guard schedule --start="2026-09-20 22:00" --end="2026-09-21 02:00"
-	 *     wp deployment-guard schedule --clear
+	 *     wp stillgate schedule --start="2026-09-20 22:00" --end="2026-09-21 02:00"
+	 *     wp stillgate schedule --clear
 	 *
 	 * @param string[]             $args
 	 * @param array<string, mixed> $assoc_args

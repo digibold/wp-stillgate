@@ -141,7 +141,7 @@ final class CliCommandTest extends TestCase {
 
 		// A hypothetical third-party plugin reacting to option writes in
 		// general (a cache or audit plugin, say): the freeze option being
-		// saved by `wp deployment-guard enable --message` must not hand it
+		// saved by `wp stillgate enable --message` must not hand it
 		// the command's own suspension.
 		add_action(
 			'updated_option',

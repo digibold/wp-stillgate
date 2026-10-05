@@ -17,7 +17,7 @@ use Digibold\DeploymentGuard\Tests\Support\CliExit;
  * `wp media import`) are blocked the same as any other actor, by
  * exercising the exact core functions those commands call (verified
  * against the real wp-cli/entity-command and wp-cli/media-command
- * sources), while Deployment Guard's own commands keep working through
+ * sources), while Stillgate's own commands keep working through
  * Suspension (see CliCommandTest).
  */
 final class CliEnforcementTest extends TestCase {
@@ -45,7 +45,7 @@ final class CliEnforcementTest extends TestCase {
 			$trigger();
 		} catch ( CliExit $exit ) {
 			$this->assertSame( 1, $exit->getCode() );
-			$this->assertStringContainsStringIgnoringCase( 'deployment guard', $exit->getMessage() );
+			$this->assertStringContainsStringIgnoringCase( 'stillgate', $exit->getMessage() );
 
 			return;
 		}

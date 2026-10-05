@@ -101,7 +101,7 @@ final class NoticesTest extends TestCase {
 		$service->enable();
 		$this->login_as( 'administrator' );
 
-		set_current_screen( 'tools_page_deployment-guard' );
+		set_current_screen( 'tools_page_stillgate' );
 		$html = $this->render_admin_notice( $notices );
 
 		$this->assertSame( '', $html );
@@ -124,21 +124,21 @@ final class NoticesTest extends TestCase {
 
 		$notices->block_editor_notice();
 
-		$this->assertTrue( wp_script_is( 'deployment-guard-editor-notice', 'enqueued' ) );
+		$this->assertTrue( wp_script_is( 'stillgate-editor-notice', 'enqueued' ) );
 	}
 
 	public function test_block_editor_notice_does_nothing_when_inactive(): void {
 		// wp_enqueue_script()'s registry is not part of the per-test
 		// database rollback; start from a known state regardless of
 		// what an earlier test in this class left enqueued.
-		wp_dequeue_script( 'deployment-guard-editor-notice' );
-		wp_deregister_script( 'deployment-guard-editor-notice' );
+		wp_dequeue_script( 'stillgate-editor-notice' );
+		wp_deregister_script( 'stillgate-editor-notice' );
 
 		list( $notices ) = $this->install();
 		$this->login_as( 'administrator' );
 
 		$notices->block_editor_notice();
 
-		$this->assertFalse( wp_script_is( 'deployment-guard-editor-notice', 'enqueued' ) );
+		$this->assertFalse( wp_script_is( 'stillgate-editor-notice', 'enqueued' ) );
 	}
 }

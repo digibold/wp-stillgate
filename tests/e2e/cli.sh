@@ -36,7 +36,7 @@ WEB_PORT="${WP_TEST_WEB_PORT:-8765}"
 WP_VERSION="${WP_VERSION:-latest}"
 
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/../.." && pwd)"
-WORK_DIR="$(mktemp -d -t deployment-guard-e2e.XXXXXX)"
+WORK_DIR="$(mktemp -d -t stillgate-e2e.XXXXXX)"
 SITE_DIR="$WORK_DIR/site"
 SITE_URL="http://127.0.0.1:$WEB_PORT"
 SERVER_PID=''
@@ -152,14 +152,14 @@ wp config create \
 wp db create 2>/dev/null || true
 wp core install \
 	--url="$SITE_URL" \
-	--title="Deployment Guard E2E" \
+	--title="Stillgate E2E" \
 	--admin_user=admin --admin_password=admin --admin_email=admin@example.test
 wp config set WP_ENVIRONMENT_TYPE local
 wp config set WP_HTTP_BLOCK_EXTERNAL true --raw
 wp config set DISABLE_WP_CRON true --raw
 
 log 'Installing the distributed plugin build (no vendor/, as a real user would get it)'
-BUILD_DIR="$SITE_DIR/wp-content/plugins/deployment-guard"
+BUILD_DIR="$SITE_DIR/wp-content/plugins/stillgate"
 mkdir -p "$BUILD_DIR"
 if git -C "$REPO_ROOT" rev-parse --git-dir >/dev/null 2>&1; then
 	git -C "$REPO_ROOT" archive --format=tar HEAD | tar -x -C "$BUILD_DIR"
@@ -183,7 +183,7 @@ cp "$REPO_ROOT/tests/Support/fixtures/pixel.png" "$WORK_DIR/pixel.png"
 mkdir -p "$SITE_DIR/wp-content/mu-plugins"
 cp "$REPO_ROOT/tests/e2e/mu-plugin-probe.php" "$SITE_DIR/wp-content/mu-plugins/dg-e2e-probe.php"
 
-wp plugin activate deployment-guard
+wp plugin activate stillgate
 
 log 'Seeding fixtures (before the freeze starts)'
 POST_ID=$(wp post create --post_title="Original" --post_status=publish --porcelain)
@@ -211,8 +211,8 @@ wp eval "global \$wpdb; \$wpdb->update( \$wpdb->posts, array( 'post_date' => '$D
 expect_eq 'scheduled post fixture is now due' "$(wp post get "$FUTURE_POST_ID" --field=post_status)" 'future'
 
 log 'Enabling the freeze'
-expect_exit 0 'wp deployment-guard enable' wp deployment-guard enable
-ACTIVE=$(wp deployment-guard status --format=json | php -r 'echo json_decode(file_get_contents("php://stdin"), true)["active"];')
+expect_exit 0 'wp stillgate enable' wp stillgate enable
+ACTIVE=$(wp stillgate status --format=json | php -r 'echo json_decode(file_get_contents("php://stdin"), true)["active"];')
 expect_eq 'status reports active' "$ACTIVE" 'true'
 
 log 'Arbitrary WP-CLI commands are blocked (WP-CLI is not exempt)'
@@ -282,7 +282,7 @@ wp_login editor editor "$EDITOR_JAR"
 expect_eq 'administrator: wp-admin dashboard returns 200 during a freeze' "$(http_get "$ADMIN_JAR" "$SITE_URL/wp-admin/")" '200'
 expect_eq 'administrator: dashboard renders without a PHP error' "$(body_has_php_error)" 'no'
 expect_eq 'administrator: dashboard shows the freeze notice' "$(body_contains 'Content changes are temporarily locked')" 'yes'
-expect_eq 'administrator: Tools > Deployment Guard returns 200' "$(http_get "$ADMIN_JAR" "$SITE_URL/wp-admin/tools.php?page=deployment-guard")" '200'
+expect_eq 'administrator: Tools > Stillgate returns 200' "$(http_get "$ADMIN_JAR" "$SITE_URL/wp-admin/tools.php?page=stillgate")" '200'
 expect_eq 'administrator: settings screen renders without a PHP error' "$(body_has_php_error)" 'no'
 expect_eq 'administrator: can still open the editor for a protected post' "$(http_get "$ADMIN_JAR" "$SITE_URL/wp-admin/post.php?post=$POST_ID&action=edit")" '200'
 
@@ -327,29 +327,29 @@ expect_eq 'ALTERNATE_WP_CRON really ran due events inside the page request' "$(w
 expect_eq 'ALTERNATE_WP_CRON: protected scheduled post still "future"' "$(wp post get "$ALT_POST_ID" --field=post_status)" 'future'
 
 log 'Ending the freeze lets everything through again'
-expect_exit 0 'wp deployment-guard disable' wp deployment-guard disable
+expect_exit 0 'wp stillgate disable' wp stillgate disable
 # Run the specific rescheduled event by name rather than --due-now: its
 # retry time is usually still a few minutes out, and `cron event run
 # <hook>` runs a named event immediately regardless of whether it is due.
 expect_exit 0 'wp cron event run publish_future_post' wp cron event run publish_future_post
 expect_eq 'scheduled post published once the freeze ended' "$(wp post get "$FUTURE_POST_ID" --field=post_status)" 'publish'
 
-log 'wp deployment-guard schedule and clear'
+log 'wp stillgate schedule and clear'
 START=$(date -u '+%Y-%m-%dT%H:%M:%S')
 END=$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || date -u -v+1H '+%Y-%m-%dT%H:%M:%S')
-expect_exit 0 'wp deployment-guard schedule' wp deployment-guard schedule --start="$START" --end="$END"
-expect_exit 0 'wp deployment-guard schedule --clear' wp deployment-guard schedule --clear
+expect_exit 0 'wp stillgate schedule' wp stillgate schedule --start="$START" --end="$END"
+expect_exit 0 'wp stillgate schedule --clear' wp stillgate schedule --clear
 
 log 'Deactivation clears the freeze'
-expect_exit 0 'wp deployment-guard enable (before deactivating)' wp deployment-guard enable
-wp plugin deactivate deployment-guard
-wp plugin activate deployment-guard
-ACTIVE_AFTER_REACTIVATE=$(wp deployment-guard status --format=json | php -r 'echo json_decode(file_get_contents("php://stdin"), true)["active"];')
+expect_exit 0 'wp stillgate enable (before deactivating)' wp stillgate enable
+wp plugin deactivate stillgate
+wp plugin activate stillgate
+ACTIVE_AFTER_REACTIVATE=$(wp stillgate status --format=json | php -r 'echo json_decode(file_get_contents("php://stdin"), true)["active"];')
 expect_eq 'freeze cleared by deactivation, not restored by reactivation' "$ACTIVE_AFTER_REACTIVATE" 'false'
 
 log 'Uninstall (plugin not loaded, as when it is deleted from the Plugins screen)'
-wp plugin deactivate deployment-guard
-expect_exit 0 'wp plugin uninstall' wp plugin uninstall deployment-guard --skip-delete
+wp plugin deactivate stillgate
+expect_exit 0 'wp plugin uninstall' wp plugin uninstall stillgate --skip-delete
 expect_eq 'freeze state option removed' "$(wp option get deployment_guard_state >/dev/null 2>&1 && echo present || echo missing)" 'missing'
 expect_eq 'activity history option removed' "$(wp option get deployment_guard_history >/dev/null 2>&1 && echo present || echo missing)" 'missing'
 expect_eq 'bypass capability removed from administrator' "$(wp cap list administrator | grep -c '^deployment_guard_bypass$' || true)" '0'

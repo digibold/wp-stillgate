@@ -59,7 +59,7 @@ final class Plugin {
 
 		if ( $is_cli ) {
 			\WP_CLI::add_command(
-				'deployment-guard',
+				'stillgate',
 				new Cli\Command( $this->service, $guard, $suspension ),
 				array( 'shortdesc' => 'Manage the editorial deployment freeze.' )
 			);
@@ -80,10 +80,10 @@ final class Plugin {
 		}
 
 		$content = '<p class="privacy-policy-tutorial">' . esc_html__(
-			'While Deployment Guard is active, it keeps a short local log of who enabled or disabled it, when scheduled freezes were changed, and which logged-in users attempted to make changes that were blocked. Each entry stores a user ID, a timestamp, and a short description of what was attempted; it never stores page content, form data, or IP addresses. This log stays in your site\'s own database, is never transmitted anywhere, and is limited to a fixed number of entries.',
-			'deployment-guard'
+			'While Stillgate is active, it keeps a short local log of who enabled or disabled it, when scheduled freezes were changed, and which logged-in users attempted to make changes that were blocked. Each entry stores a user ID, a timestamp, and a short description of what was attempted; it never stores page content, form data, or IP addresses. This log stays in your site\'s own database, is never transmitted anywhere, and is limited to a fixed number of entries.',
+			'stillgate'
 		) . '</p>';
 
-		wp_add_privacy_policy_content( __( 'Deployment Guard', 'deployment-guard' ), $content );
+		wp_add_privacy_policy_content( __( 'Stillgate', 'stillgate' ), $content );
 	}
 }

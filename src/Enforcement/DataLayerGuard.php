@@ -20,7 +20,7 @@ defined( 'ABSPATH' ) || exit;
  * hooks the functions themselves.
  *
  * Two response styles, chosen by actor context:
- *  - In a real WP-CLI command (any command other than Deployment Guard's
+ *  - In a real WP-CLI command (any command other than Stillgate's
  *    own — see Suspension), a blocked write ends the process immediately
  *    with `WP_CLI::error()`: a clear message and exit code 1, exactly as
  *    required for a deployment script to detect and stop on.
@@ -258,7 +258,7 @@ final class DataLayerGuard {
 
 		wp_die(
 			esc_html( $this->guard->message_text() ),
-			esc_html__( 'Deployment freeze active', 'deployment-guard' ),
+			esc_html__( 'Deployment freeze active', 'stillgate' ),
 			array( 'response' => 423 )
 		);
 	}
@@ -327,7 +327,7 @@ final class DataLayerGuard {
 	private function cli_message(): string {
 		return sprintf(
 			/* translators: %s: the reason the write was blocked. */
-			__( 'Deployment Guard: %s', 'deployment-guard' ),
+			__( 'Stillgate: %s', 'stillgate' ),
 			$this->guard->message_text()
 		);
 	}

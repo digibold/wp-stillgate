@@ -18,7 +18,7 @@ defined( 'ABSPATH' ) || exit;
  * this through one place keeps every read consistently unslashed and
  * type-checked, and keeps the justification for skipping nonce
  * verification (nonce verification is core's job for the request it is
- * already handling; Deployment Guard only reads the same fields core is
+ * already handling; Stillgate only reads the same fields core is
  * about to read) in one place instead of repeated at every call site.
  */
 final class Input {
