@@ -13,13 +13,19 @@ use Digibold\DeploymentGuard\Plugin;
 defined( 'ABSPATH' ) || exit;
 
 /**
- * Shows a visible but professional notice on classic wp-admin screens,
- * and an equivalent notice inside the block editor, whenever a freeze is
- * active. Explains that Stillgate is active, when it is expected
- * to end (if scheduled), the operator's own message, and whether the
- * current user can bypass it — so a restricted user understands why
- * editing is unavailable, rather than encountering it as a confusing
- * error.
+ * Shows a visible but professional notice on the classic wp-admin screens
+ * where a freeze actually affects editorial work, and an equivalent notice
+ * inside the block editor, whenever a freeze is active. Explains that
+ * Stillgate is active, when it is expected to end (if scheduled), the
+ * operator's own message, whether the current user can bypass it, and how
+ * the freeze ends — so a restricted user understands why editing is
+ * unavailable, rather than encountering it as a confusing error.
+ *
+ * The classic notice is deliberately not site-wide: it appears only on the
+ * dashboard and on the screens that list or edit protected content (see
+ * screen_is_affected()), and it is rendered only while a freeze is
+ * active, so it disappears by itself the moment the freeze ends. Nothing
+ * is stored about it: there is no dismissal state.
  */
 final class Notices {
 
@@ -45,7 +51,11 @@ final class Notices {
 
 		$screen = get_current_screen();
 
-		if ( $screen && ( $screen->is_block_editor() || 'tools_page_stillgate' === $screen->id ) ) {
+		if ( ! $screen || $screen->is_block_editor() || 'tools_page_stillgate' === $screen->id ) {
+			return;
+		}
+
+		if ( ! $this->screen_is_affected( $screen ) ) {
 			return;
 		}
 
@@ -61,10 +71,24 @@ final class Notices {
 			$html .= '<p>' . esc_html( $paragraph ) . '</p>';
 		}
 
-		$html .= '<p>' . ( $can_bypass
-			? esc_html__( 'You can continue editing, but your changes may still be lost if a deployment or migration proceeds.', 'stillgate' )
-			: esc_html__( 'Editing is unavailable to your account until the freeze ends.', 'stillgate' ) )
-			. '</p>';
+		if ( $can_bypass ) {
+			$html .= '<p>' . esc_html__( 'You can continue editing, but your changes may still be lost if a deployment or migration proceeds.', 'stillgate' ) . '</p>';
+
+			if ( current_user_can( 'manage_options' ) ) {
+				$html .= '<p>' . wp_kses(
+					sprintf(
+						/* translators: %s: URL of the Stillgate settings screen. */
+						__( 'You can end the freeze under <a href="%s">Tools &gt; Stillgate</a>.', 'stillgate' ),
+						esc_url( admin_url( 'tools.php?page=stillgate' ) )
+					),
+					array( 'a' => array( 'href' => array() ) )
+				) . '</p>';
+			} else {
+				$html .= '<p>' . esc_html__( 'To end the freeze, ask a site administrator.', 'stillgate' ) . '</p>';
+			}
+		} else {
+			$html .= '<p>' . esc_html__( 'Editing is unavailable to your account until the freeze ends. This notice disappears when it does; if you need to change something sooner, ask a site administrator.', 'stillgate' ) . '</p>';
+		}
 
 		wp_admin_notice(
 			$html,
@@ -73,6 +97,41 @@ final class Notices {
 				'paragraph_wrap' => false,
 			)
 		);
+	}
+
+	/**
+	 * Whether a freeze affects editorial work on this screen. Derived from
+	 * the screen itself and from the same protected post types and
+	 * taxonomies the enforcement layers use (including anything a site adds
+	 * or removes through the `deployment_guard_protected_types` filter), not
+	 * from a fixed list of screen IDs: a custom post type's list and edit
+	 * screens, and a custom taxonomy's term screens, are covered exactly
+	 * when that type is protected. The remaining cases are the surfaces that
+	 * are protected as a group (media, menus, widgets, the Customizer, the
+	 * classic Custom Header and Custom Background screens) and the dashboard,
+	 * where Quick Draft is withdrawn during a freeze.
+	 */
+	private function screen_is_affected( \WP_Screen $screen ): bool {
+		switch ( $screen->base ) {
+			case 'dashboard':
+			case 'upload':
+			case 'media':
+			case 'nav-menus':
+			case 'widgets':
+			case 'customize':
+			case 'site-editor':
+				return true;
+
+			case 'edit':
+			case 'post':
+				return '' !== (string) $screen->post_type && $this->guard->is_protected_post_type( (string) $screen->post_type );
+
+			case 'edit-tags':
+			case 'term':
+				return '' !== (string) $screen->taxonomy && $this->guard->is_protected_taxonomy( (string) $screen->taxonomy );
+		}
+
+		return in_array( $screen->id, array( 'appearance_page_custom-header', 'appearance_page_custom-background' ), true );
 	}
 
 	/**
