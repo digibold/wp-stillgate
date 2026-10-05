@@ -32,6 +32,19 @@ defined( 'ABSPATH' ) || exit;
 
 require_once __DIR__ . '/src/autoload.php';
 
+/*
+ * Releases up to 0.1.0 were published as "Deployment Guard" and share this
+ * plugin's namespace, options and capability. If such a copy (or a second
+ * Stillgate folder) has already loaded, its classes are in memory: stay
+ * passive, so the two never register twice, and explain on the Plugins
+ * screen how to switch over. See LegacyCopy.
+ */
+if ( class_exists( __NAMESPACE__ . '\\Plugin', false ) ) {
+	( new LegacyCopy( true ) )->register_notice();
+
+	return;
+}
+
 register_activation_hook( __FILE__, array( Installer::class, 'activate' ) );
 
 ( new Plugin( __FILE__ ) )->register();

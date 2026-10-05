@@ -27,6 +27,16 @@ final class Plugin {
 	}
 
 	public function register(): void {
+		// An earlier release (published as "Deployment Guard") that loads
+		// after this copy resolves this same class by name and calls
+		// register() with its own main file. Only this copy's own main
+		// file may register, or every hook would be added twice.
+		if ( realpath( $this->file ) !== realpath( dirname( __DIR__ ) . '/stillgate.php' ) ) {
+			return;
+		}
+
+		( new LegacyCopy() )->register();
+
 		$suspension = new Suspension();
 		$clock      = static fn (): int => time();
 

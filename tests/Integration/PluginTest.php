@@ -38,6 +38,30 @@ final class PluginTest extends TestCase {
 		$this->assertTrue( $this->has_callback_of( 'load-post.php', AdminGate::class ) );
 	}
 
+	public function test_register_ignores_a_main_file_that_is_not_this_copies_own(): void {
+		global $wp_filter;
+
+		$count = static function () use ( &$wp_filter ): int {
+			$total = 0;
+
+			foreach ( $wp_filter as $hook ) {
+				foreach ( $hook->callbacks as $callbacks ) {
+					$total += count( $callbacks );
+				}
+			}
+
+			return $total;
+		};
+
+		$before = $count();
+
+		// What an earlier "Deployment Guard" copy loaded after this one does:
+		// it resolves this class by name and passes its own main file.
+		( new Plugin( WP_PLUGIN_DIR . '/deployment-guard/deployment-guard.php' ) )->register();
+
+		$this->assertSame( $before, $count() );
+	}
+
 	private function has_callback_of( string $hook, string $class_name ): bool {
 		global $wp_filter;
 

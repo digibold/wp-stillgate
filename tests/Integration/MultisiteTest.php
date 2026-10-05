@@ -179,4 +179,37 @@ final class MultisiteTest extends TestCase {
 		$this->assertFalse( get_role( 'administrator' )->has_cap( Installer::CAPABILITY ) );
 		restore_current_blog();
 	}
+
+	public function test_removing_the_earlier_copy_keeps_every_sites_state_and_role_grants(): void {
+		$site_b = self::factory()->blog->create();
+
+		update_option( FreezeService::OPTION_STATE, array( 'schema' => 1, 'enabled' => false, 'message' => 'site A' ), false );
+		remove_role( 'dg_release_editor' );
+		add_role( 'dg_release_editor', 'Release Editor', array( 'read' => true, Installer::CAPABILITY => true ) );
+
+		switch_to_blog( $site_b );
+		Installer::install_site();
+		update_option( FreezeService::OPTION_STATE, array( 'schema' => 1, 'enabled' => false, 'message' => 'site B' ), false );
+		update_option( FreezeService::OPTION_HISTORY, array( array( 't' => 1, 'type' => 'enabled', 'user' => 1, 'ctx' => array() ) ), false );
+		restore_current_blog();
+
+		$legacy_copy = new \Digibold\DeploymentGuard\LegacyCopy();
+		$legacy_copy->register();
+
+		// The earlier release's uninstall walks every site of the network.
+		do_action( 'pre_uninstall_plugin', 'deployment-guard/deployment-guard.php', array() );
+		Installer::uninstall();
+		$this->assertFalse( get_option( FreezeService::OPTION_STATE ), 'precondition: the uninstall wiped site A' );
+		do_action( 'deleted_plugin', 'deployment-guard/deployment-guard.php', true );
+
+		$this->assertSame( 'site A', get_option( FreezeService::OPTION_STATE )['message'] );
+		$this->assertTrue( get_role( 'dg_release_editor' )->has_cap( Installer::CAPABILITY ) );
+		$this->assertTrue( get_role( 'administrator' )->has_cap( Installer::CAPABILITY ) );
+
+		switch_to_blog( $site_b );
+		$this->assertSame( 'site B', get_option( FreezeService::OPTION_STATE )['message'] );
+		$this->assertCount( 1, get_option( FreezeService::OPTION_HISTORY ) );
+		$this->assertTrue( get_role( 'administrator' )->has_cap( Installer::CAPABILITY ) );
+		restore_current_blog();
+	}
 }
