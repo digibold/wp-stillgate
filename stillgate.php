@@ -2,8 +2,8 @@
 /**
  * Plugin Name:       Stillgate — Editorial Freeze for Deployments
  * Plugin URI:        https://github.com/digibold/wp-stillgate
- * Description:       Locks editorial changes during deployments and migrations while the site stays online.
- * Version:           0.1.1
+ * Description:       Freezes editing during deployments and migrations, optionally pauses comments and forms, ends on a timer, and reports what changed.
+ * Version:           0.2.0
  * Requires at least: 6.6
  * Requires PHP:      8.1
  * Author:            Linards Lazdins

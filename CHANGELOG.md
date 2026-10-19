@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+## [0.2.0] - 2026-10-19
+
+Timed freezes, a REST API, an optional pause of visitor comments and forms, and a receipt of what changed while a freeze was on. Nothing changes for an existing site until the new options are used: the coverage choices are off by default and the stored settings carry over.
+
 ### Added
 
 - **Timed freezes.** `wp stillgate enable --for=30m`, a duration picker on the settings screen and `POST /freeze` with `for` start a freeze that ends by itself, so a deployment that fails halfway cannot leave editing locked. Durations are `30m`, `2h`, `1d` or combinations such as `1h30m`; at least one minute, at most seven days.
@@ -18,12 +22,12 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - **Admin bar status.** A small pill shows an active freeze and when it ends, or a window starting within the hour, with end and +15 minutes actions for people allowed to use them. It is a dot on a phone, disappears by itself, and is built for logged-in users only.
 - **Site Health test.** Reports an active freeze, a manual freeze that has run for six hours or more, a freeze forced on in `wp-config.php`, and a state nobody can end from wp-admin.
 - Filters `deployment_guard_submissions_paused`, `deployment_guard_visitor_message`, `deployment_guard_paused_comment_types` and `deployment_guard_form_requests`; the `deployment_guard_state_changed` source can now be `rest`.
-- Logo, icon and banner artwork for the plugin directory and the repository.
+- New logo, icon, banners and four screenshots for the plugin directory and the repository, and a live-preview blueprint for the WordPress.org plugin page.
 
 ### Changed
 
 - The administrator notice is now decided by the same shared check as the freeze itself.
-- Uninstalling also removes the stored coverage choice and the receipt.
+- Uninstalling also removes the stored coverage choice, the receipt and the refusal counters.
 
 ## [0.1.1] - 2026-10-05
 
@@ -61,6 +65,7 @@ Initial release.
 - Multisite-safe per-site operation.
 - `DEPLOYMENT_GUARD_FORCE` constant for `wp-config.php` to force the freeze on or off regardless of stored state.
 
-[Unreleased]: https://github.com/digibold/wp-stillgate/compare/v0.1.1...HEAD
+[Unreleased]: https://github.com/digibold/wp-stillgate/compare/v0.2.0...HEAD
+[0.2.0]: https://github.com/digibold/wp-stillgate/compare/v0.1.1...v0.2.0
 [0.1.1]: https://github.com/digibold/wp-stillgate/compare/v0.1.0...v0.1.1
 [0.1.0]: https://github.com/digibold/wp-stillgate/releases/tag/v0.1.0
