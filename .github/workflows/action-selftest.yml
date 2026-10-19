@@ -1,0 +1,260 @@
+name: Action self-test
+
+# Runs the GitHub Action (action.yml, action/) from this checkout on a real
+# GitHub runner against a throwaway WordPress site with this checkout's
+# plugin. The unit tests and tests/e2e/action.sh run the same code, but only
+# a runner can show that the runner starts the main and the post step, hands
+# the saved state to the post step, and lets the post step release the freeze
+# when the job ends.
+
+on:
+  pull_request:
+    paths:
+      - 'action/**'
+      - 'action.yml'
+      - 'tests/e2e/action.sh'
+      - '.github/workflows/action-selftest.yml'
+      # The Action reads these fields of the REST API and the receipt.
+      - 'src/Rest/**'
+      - 'src/Receipt.php'
+      - 'src/FreezeService.php'
+      - 'src/FreezeConfig.php'
+  push:
+    branches: [main]
+    paths:
+      - 'action/**'
+      - 'action.yml'
+      - 'tests/e2e/action.sh'
+      - '.github/workflows/action-selftest.yml'
+      # The Action reads these fields of the REST API and the receipt.
+      - 'src/Rest/**'
+      - 'src/Receipt.php'
+      - 'src/FreezeService.php'
+      - 'src/FreezeConfig.php'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  freeze:
+    name: Freeze and verify
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    services:
+      mysql:
+        image: mysql:8.4
+        env:
+          MYSQL_ROOT_PASSWORD: root
+          MYSQL_DATABASE: selftest
+        ports:
+          - 3306:3306
+        options: >-
+          --health-cmd="mysqladmin ping"
+          --health-interval=10s
+          --health-timeout=5s
+          --health-retries=5
+    env:
+      DB_HOST: 127.0.0.1:3306
+      DB_NAME: selftest
+      DB_USER: root
+      DB_PASSWORD: root
+      SITE_PORT: '8080'
+      SITE_URL: http://127.0.0.1:8080
+    # frozen and ends-at come from the main step. The post step of the Action
+    # runs after the last step below and writes receipt-clean; listing it
+    # here finds out whether the runner lets a post-step output reach the job
+    # outputs, and the second job reports what it saw. action.yml does not
+    # declare receipt-clean (the runner should drop it), so it is read from the
+    # outputs object by name; an absent one evaluates to an empty string.
+    outputs:
+      frozen: ${{ steps.stillgate.outputs.frozen }}
+      ends-at: ${{ steps.stillgate.outputs.ends-at }}
+      receipt-clean: ${{ fromJSON(toJSON(steps.stillgate.outputs))['receipt-clean'] }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: shivammathur/setup-php@f3e473d116dcccaddc5834248c87452386958240 # 2.37.2
+        with:
+          php-version: '8.3'
+          extensions: mysqli
+          coverage: none
+          tools: wp-cli
+
+      - name: Wait for MySQL
+        run: |
+          for _ in $(seq 1 30); do
+            mysqladmin ping -h127.0.0.1 -P3306 -uroot -proot --silent && break
+            sleep 2
+          done
+
+      - name: Create a throwaway WordPress site with the plugin from this checkout
+        run: |
+          set -euo pipefail
+          site="$RUNNER_TEMP/site"
+          mkdir -p "$site"
+          cd "$site"
+
+          wp core download
+          wp config create \
+            --dbname="$DB_NAME" --dbuser="$DB_USER" --dbpass="$DB_PASSWORD" --dbhost="$DB_HOST"
+          wp core install \
+            --url="$SITE_URL" --title="Stillgate Action self-test" \
+            --admin_user=admin --admin_password="$(openssl rand -hex 16)" --admin_email=admin@example.test
+          # Application Passwords need https unless the site says it is local.
+          wp config set WP_ENVIRONMENT_TYPE local
+          wp config set WP_HTTP_BLOCK_EXTERNAL true --raw
+          wp config set DISABLE_WP_CRON true --raw
+
+          # The plugin as it is distributed (git archive honours the
+          # export-ignore lines), not the whole checkout.
+          mkdir -p wp-content/plugins/stillgate
+          git -C "$GITHUB_WORKSPACE" archive --format=tar HEAD | tar -x -C wp-content/plugins/stillgate
+          test ! -e wp-content/plugins/stillgate/action.yml
+          test ! -e wp-content/plugins/stillgate/action
+          wp plugin activate stillgate
+
+          # Fixtures, created before any freeze.
+          post_id="$(wp post create --post_title="Original" --post_status=publish --porcelain)"
+          wp user create editor editor@example.test --role=editor --user_pass="$(openssl rand -hex 16)"
+          wp rewrite structure '/%postname%/'
+          wp rewrite flush
+
+          # Application Passwords go to later steps through the environment,
+          # masked in the log first. WP-CLI prints them without the spaces
+          # that the profile screen shows.
+          admin_password="$(wp user application-password create admin selftest --porcelain)"
+          editor_password="$(wp user application-password create editor selftest --porcelain)"
+          echo "::add-mask::$admin_password"
+          echo "::add-mask::$editor_password"
+          {
+            echo "STILLGATE_APP_PASSWORD=$admin_password"
+            echo "EDITOR_APP_PASSWORD=$editor_password"
+            echo "POST_ID=$post_id"
+          } >> "$GITHUB_ENV"
+
+      - name: Serve the site
+        run: |
+          set -euo pipefail
+          cd "$RUNNER_TEMP/site"
+          # php -S falls back to index.php for paths that are not files, so
+          # pretty permalinks (and /wp-json/) work without a router.
+          PHP_CLI_SERVER_WORKERS=4 nohup php -S "127.0.0.1:$SITE_PORT" -t "$RUNNER_TEMP/site" \
+            > "$RUNNER_TEMP/php-server.log" 2>&1 &
+          for _ in $(seq 1 30); do
+            curl -fsS -o /dev/null --max-time 10 "$SITE_URL/wp-json/" && break
+            sleep 1
+          done
+          curl -fsS -o /dev/null --max-time 10 "$SITE_URL/wp-json/"
+          # A block theme creates its fallback navigation menu on the first
+          # render of the front page. That is a content write, and a receipt
+          # counts a write in the second the freeze begins. Render it now,
+          # then let the second pass.
+          curl -fsS -o /dev/null --max-time 120 "$SITE_URL/"
+          sleep 2
+
+      - name: Freeze with the Action
+        id: stillgate
+        uses: ./
+        with:
+          site-url: ${{ env.SITE_URL }}
+          username: admin
+          app-password: ${{ env.STILLGATE_APP_PASSWORD }}
+          duration: 10m
+          message: Self-test freeze
+          fail-on-changes: 'true'
+
+      - name: The freeze is on and restricted actions are refused
+        working-directory: ${{ runner.temp }}/site
+        env:
+          FROZEN: ${{ steps.stillgate.outputs.frozen }}
+          ENDS_AT: ${{ steps.stillgate.outputs.ends-at }}
+        run: |
+          set -euo pipefail
+          api="$SITE_URL/wp-json/stillgate/v1"
+
+          test "$FROZEN" = true
+          echo "$ENDS_AT" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}(Z|[+-][0-9:]{5})$'
+
+          status="$(curl -fsS -u "admin:$STILLGATE_APP_PASSWORD" "$api/status")"
+          echo "$status" | jq .
+          echo "$status" | jq -e --arg ends "$ENDS_AT" '.active == true and .message == "Self-test freeze" and .ends_at == $ends'
+
+          # WP-CLI without --user is an ordinary actor: refused.
+          if wp post update "$POST_ID" --post_title="Changed during the freeze"; then
+            echo "::error::wp post update was accepted while the site was frozen"
+            exit 1
+          fi
+          test "$(wp post get "$POST_ID" --field=post_title)" = "Original"
+
+          # An editor over REST: refused with 423 (Locked).
+          code="$(curl -sS -o /dev/null -w '%{http_code}' -u "editor:$EDITOR_APP_PASSWORD" \
+            -X POST --data-urlencode 'title=Over REST' "$SITE_URL/wp-json/wp/v2/posts/$POST_ID")"
+          echo "editor REST write answered HTTP $code"
+          test "$code" = 423
+
+      # No step follows. When the job ends, the runner runs the Action's post
+      # step by itself: it reads the receipt, ends the freeze and fails the
+      # job if the receipt is not clean.
+
+  released:
+    name: The post step ran
+    needs: freeze
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - name: The first job reported the freeze it started
+        env:
+          FROZEN: ${{ needs.freeze.outputs.frozen }}
+          ENDS_AT: ${{ needs.freeze.outputs.ends-at }}
+        run: |
+          set -euo pipefail
+          test "$FROZEN" = true
+          echo "$ENDS_AT" | grep -Eq '^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9:]{8}(Z|[+-][0-9:]{5})$'
+
+      # The post step runs after the first job's last step, so nothing in
+      # that job can see it. The jobs API lists it as a step of its own,
+      # named after the step that started the freeze. It succeeds only if
+      # the receipt was clean and the freeze was ended (fail-on-changes is
+      # true, and a failed release also fails the step).
+      - name: The post step finished successfully on the runner
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -euo pipefail
+          conclusion="$(gh api "repos/$GITHUB_REPOSITORY/actions/runs/$GITHUB_RUN_ID/attempts/$GITHUB_RUN_ATTEMPT/jobs" \
+            --jq '.jobs[] | select(.name == "Freeze and verify") | .steps[] | select(.name == "Post Freeze with the Action") | .conclusion')"
+          echo "Post step conclusion: '$conclusion'"
+          if [ "$conclusion" != success ]; then
+            echo "::error::The step 'Post Freeze with the Action' of the first job did not conclude with success."
+            exit 1
+          fi
+
+      # Whether the runner passes outputs that a post step writes on to the
+      # job outputs is not documented. The runner source drops them (see
+      # SetOutput in actions/runner, Runner.Worker/ExecutionContext.cs: a
+      # step without a context name, which a post step has, stores nothing),
+      # so this step reports what this runner did and does not fail either
+      # way. action.yml does not declare receipt-clean for that reason.
+      - name: Report whether post-step outputs reach job outputs
+        env:
+          RECEIPT_CLEAN: ${{ needs.freeze.outputs.receipt-clean }}
+        run: |
+          case "$RECEIPT_CLEAN" in
+            true)
+              echo "::notice::The job output receipt-clean is 'true': this runner passes post-step outputs on to job outputs."
+              ;;
+            '')
+              echo "::notice::The job output receipt-clean is empty: this runner does not pass post-step outputs on to job outputs. The receipt verdict is in the job summary and in the result of the job."
+              ;;
+            *)
+              echo "::error::The job output receipt-clean is '$RECEIPT_CLEAN' although the first job succeeded."
+              exit 1
+              ;;
+          esac

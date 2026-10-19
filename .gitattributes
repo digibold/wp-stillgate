@@ -5,6 +5,8 @@
 
 # Files and directories excluded from `git archive` release builds.
 /.github                     export-ignore
+/action                      export-ignore
+/action.yml                  export-ignore
 /.wordpress-org              export-ignore
 /bin                         export-ignore
 /docs                        export-ignore

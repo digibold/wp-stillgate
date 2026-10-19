@@ -7,6 +7,10 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **A GitHub Action**, `digibold/wp-stillgate@action-v1`, that freezes a site for the length of a job, reads the receipt at the end and ends the freeze even when the job failed. It has no dependencies, is tested against a mock site and a real one, and runs on a GitHub runner in this repository's CI. Documentation and recipes for GitHub Actions, Deployer, Trellis and Bedrock are in `docs/recipes`. None of this ships in the plugin zip, so there is no plugin release for it.
+
 ## [0.2.0] - 2026-10-19
 
 Timed freezes, a REST API, an optional pause of visitor comments and forms, and a receipt of what changed while a freeze was on. Nothing changes for an existing site until the new options are used: the coverage choices are off by default and the stored settings carry over.
