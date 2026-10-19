@@ -1,7 +1,17 @@
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="docs/img/logo-dark.svg">
+    <img src="docs/img/logo.svg" alt="Stillgate" width="340">
+  </picture>
+</p>
+
 # Stillgate — Editorial Freeze for Deployments
 
 Stillgate protects production WordPress installations during
-migrations, deployments, and maintenance windows.
+migrations, deployments, and maintenance windows. It freezes editorial
+changes for a set time, can also pause visitor comments and form
+submissions, ends by itself when the time is up, and tells you afterwards
+whether anything changed while it was on.
 
 ## The problem
 
@@ -34,11 +44,12 @@ queries, or a plugin that writes content without asking WordPress whether
 the user may — is outside what it can see; see
 [Known limitations](#known-limitations).
 
-A freeze can be turned on immediately, or configured as a scheduled window
-(start and end, in the site's own timezone). Whether a freeze is active is
-computed from the current time and stored configuration on **every**
-relevant request — it never depends on a WP-Cron event having fired on
-time.
+A freeze can be turned on immediately, started for a set time (for
+example 30 minutes, after which it ends by itself and can be extended if the
+deployment runs long), or configured as a scheduled window (start and end, in
+the site's own timezone). Whether a freeze is active is computed from the
+current time and stored configuration on **every** relevant request — it
+never depends on a WP-Cron event having fired on time.
 
 For the full enforcement design — which hooks are used where, and why —
 see [docs/architecture.md](docs/architecture.md).
@@ -58,10 +69,11 @@ active.** They stay `future` and publish normally, through WordPress's own
 mechanism, once the freeze ends (see
 [docs/architecture.md](docs/architecture.md#scheduled-publishing)).
 
-**Not protected:** comments and Notes, users, plugins and themes, and
-general site settings/options. The public, logged-out frontend is never
-affected — a customer checking out, or a visitor leaving a comment, is
-unaffected regardless of whether a freeze is active.
+**Not protected:** users, plugins and themes, and general site
+settings/options. The public, logged-out frontend is never affected — a
+customer checking out is unaffected regardless of whether a freeze is
+active. Visitor comments and form submissions also keep working unless you
+choose to pause them; see [Pausing comments and forms](#pausing-comments-and-forms-opt-in).
 
 ## Bypass behavior
 
@@ -140,11 +152,19 @@ Things to know:
 
 ## Usage
 
-Turn a freeze on or off, or configure a message shown to restricted users,
-from **Tools > Stillgate**. The screen shows current status, whether
-your own account can bypass the freeze, which roles hold the bypass
-capability, and the effective list of protected content. Enabling a freeze
-requires an explicit confirmation checkbox.
+Everything is on one screen, **Tools > Stillgate**. It leads with the
+current state (open, frozen, or a window scheduled) and the one thing to do
+next: start a freeze for 15 minutes to 4 hours or until you end it, end it, or
+extend a timed one. Below it are the receipt of the latest freeze, Coverage
+(what a freeze covers), the schedule, the message shown to editors, the commands
+for a pipeline, access, the protected content, and the activity log. Starting a freeze requires an
+explicit confirmation checkbox. While a freeze runs, a small status in the
+admin bar shows when it ends (a dot on a phone), with end and extend actions
+for the people allowed to use them, and Tools > Site Health reports a freeze
+that has been left on.
+
+A timed freeze is the safest way to run a deployment: if the job fails or the
+runner dies, editing unlocks by itself.
 
 ### Scheduled freeze example
 
@@ -162,13 +182,66 @@ window can coexist; the effective rule is "active if either says so".
 
 ```bash
 wp stillgate status
-wp stillgate enable --message="Deploying now, back in 10 minutes."
+wp stillgate enable --for=30m --message="Deploying now, back in 30 minutes."
+wp stillgate extend 15m
+wp stillgate scope --comments=on --forms=on
+wp stillgate receipt --check
 wp stillgate schedule --start="2026-09-20 22:00" --end="2026-09-21 02:00"
 wp stillgate disable
 ```
 
 Full reference, including a deploy script recipe and Multisite usage, in
 [docs/wp-cli.md](docs/wp-cli.md).
+
+### Pausing comments and forms (opt-in)
+
+Anything a visitor saves while a deployment runs can be lost when the
+database is replaced, the same as an editor's change. Under **Coverage** on
+the settings screen, or with `wp stillgate scope`, you can include visitor
+comments and form submissions in a freeze. Both default to off, so nothing
+changes unless you choose it.
+
+- **Comments**: new comments, reviews, pingbacks and trackbacks are refused
+  with a clear message, through the comment form, the REST API and XML-RPC.
+  Internal comment types such as WooCommerce order notes keep working.
+- **Forms**: submissions of the common form plugins are refused and the
+  visitor is told the form is paused. Which plugins were checked, and how, is
+  in [docs/forms.md](docs/forms.md); other forms can be added with a filter.
+- People who can bypass the freeze can still comment and submit. The check is
+  made when a submission arrives, never when a page is shown, so page caches
+  cannot serve a stale state.
+- Orders and checkout are never paused.
+
+### The freeze receipt
+
+Every freeze leaves a receipt of what happened to the content while it ran:
+posts saved, created or trashed, estimated deletions, term changes, comments
+added, and how many visitor submissions were paused. A clean receipt tells a
+deploy that nothing the receipt can see changed while the freeze was on, so the
+database it copied at the start is still complete. A dirty one lists exactly
+which posts changed, so you can look at them before overwriting anything. It
+only covers the time the freeze was on: run the check while the freeze is still
+running, or make the freeze last as long as the work.
+
+```bash
+wp stillgate receipt --check || echo "content changed, or nothing can be promised"
+wp export --post__in="$(wp stillgate drift)" --dir=/backups
+```
+
+The receipt is a detector. It does not synchronize databases, and
+[docs/receipt.md](docs/receipt.md) says plainly what it cannot see.
+
+### For pipelines (REST API)
+
+A CI/CD job can start, extend and end a freeze over HTTPS with an Application
+Password, no SSH needed:
+
+```bash
+curl -fsS -u "$WP_USER:$WP_APP_PASSWORD" -X POST "$SITE/wp-json/stillgate/v1/freeze" -d for=30m
+```
+
+See [docs/rest-api.md](docs/rest-api.md) for every route, permissions and a
+GitHub Actions example.
 
 ## REST API and XML-RPC behavior
 
@@ -199,7 +272,7 @@ and `pingback.ping` are unaffected.
 
 ## Multisite behavior
 
-Stillgate operates per site in `0.1.0` — there is no network-wide
+Stillgate operates per site in this version — there is no network-wide
 freeze screen. Each site's freeze is configured, and enforced,
 independently; a Super Admin is always treated as a bypass holder, on every
 site. See [docs/architecture.md](docs/architecture.md#multisite) for
@@ -239,10 +312,11 @@ The complete list, with the reasoning behind each, is in
   see [docs/architecture.md](docs/architecture.md).
 - Capability-based throughout, never role-based by name.
 - Nonces and capabilities are verified on every state-changing request to
-  the settings screen; input is sanitized and output is escaped. The
-  plugin runs no direct SQL.
-- No custom database table; two options, both created on activation and
-  removed on uninstall.
+  the settings screen; input is sanitized and output is escaped. The only
+  direct SQL is the freeze receipt's read-only, prepared queries; nothing
+  writes to WordPress's own tables.
+- No custom database table; four options (freeze state, activity log,
+  coverage choice, receipt), removed on uninstall.
 - The activity log never stores request payloads, message bodies, or IP
   addresses — only a timestamp, event type, user ID, and a short,
   allowlisted context.
@@ -256,7 +330,9 @@ Stillgate makes **no outbound HTTP requests** and sends **no data to
 any external service**. It requires no external account, license key, or
 cloud service. Its activity log is a bounded local option, described to
 site owners through WordPress's own Privacy Policy content mechanism, and
-is deleted entirely on uninstall.
+is deleted entirely on uninstall. The freeze receipt keeps counts,
+timestamps and post IDs only, never content or personal data, and is deleted
+on uninstall too.
 
 ## Development
 

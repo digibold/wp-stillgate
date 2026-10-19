@@ -7,6 +7,24 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- **Timed freezes.** `wp stillgate enable --for=30m`, a duration picker on the settings screen and `POST /freeze` with `for` start a freeze that ends by itself, so a deployment that fails halfway cannot leave editing locked. Durations are `30m`, `2h`, `1d` or combinations such as `1h30m`; at least one minute, at most seven days.
+- **Extend.** `wp stillgate extend 15m`, the +15/+30/+60 minute buttons and `POST /freeze/extend` push the end of a timed or scheduled freeze back when a deployment is taking longer than planned.
+- **REST API for pipelines**, `stillgate/v1`: `/status`, `/freeze`, `/freeze/extend`, `/schedule`, `/scope` and `/receipt`, authenticated with Application Passwords and limited to people who may change the freeze on the settings screen. See `docs/rest-api.md`.
+- **Pause comments and forms during a freeze (opt-in).** Under Coverage on the settings screen, or `wp stillgate scope --comments=on --forms=on`, new visitor comments, and submissions of Contact Form 7, WPForms, Ninja Forms, Fluent Forms, Forminator, Formidable and Everest Forms (each checked on a real site), are refused with a clear message while a freeze runs, instead of being saved into a database that is about to be replaced. Both default to off. The check is made when a submission arrives, never when a page is shown, so full-page caches cannot serve a stale state. Recognition is extensible with the `deployment_guard_form_requests` filter; see `docs/forms.md`.
+- **Freeze receipt.** Every freeze now leaves a receipt of what changed in the content while it ran: posts saved, created or trashed, estimated deletions, term changes, comments added, and how many visitor submissions were paused. `wp stillgate receipt [--check]`, `wp stillgate drift`, `GET /receipt` and a card on the settings screen show it. It is a detector, not a synchronizer; see `docs/receipt.md` for what it can and cannot see. `receipt --check` passes only for a clean receipt. A scheduled window that began and ended unobserved is recorded as unverified rather than leaving an older receipt standing.
+- **Redesigned settings screen.** Tools > Stillgate leads with the current state and the next action, followed by the receipt, Coverage, the schedule and message, commands for pipelines, and the activity log.
+- **Admin bar status.** A small pill shows an active freeze and when it ends, or a window starting within the hour, with end and +15 minutes actions for people allowed to use them. It is a dot on a phone, disappears by itself, and is built for logged-in users only.
+- **Site Health test.** Reports an active freeze, a manual freeze that has run for six hours or more, a freeze forced on in `wp-config.php`, and a state nobody can end from wp-admin.
+- Filters `deployment_guard_submissions_paused`, `deployment_guard_visitor_message`, `deployment_guard_paused_comment_types` and `deployment_guard_form_requests`; the `deployment_guard_state_changed` source can now be `rest`.
+- Logo, icon and banner artwork for the plugin directory and the repository.
+
+### Changed
+
+- The administrator notice is now decided by the same shared check as the freeze itself.
+- Uninstalling also removes the stored coverage choice and the receipt.
+
 ## [0.1.1] - 2026-10-05
 
 The plugin is renamed from Deployment Guard to Stillgate. Stored settings carry over; see "Upgrading from Deployment Guard 0.1.0" in the README for the switch-over sequence.

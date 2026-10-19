@@ -8,7 +8,7 @@ Stable tag: 0.1.1
 License: GPLv2 or later
 License URI: https://www.gnu.org/licenses/gpl-2.0.html
 
-Locks editorial changes during deployments and migrations while the public frontend stays fully available.
+Freezes editing during deployments and migrations, optionally pauses comments and forms, ends on a timer, and reports what changed.
 
 == Description ==
 
@@ -31,10 +31,42 @@ changes. Scheduled posts of a protected type do not publish while the
 freeze is active; they remain scheduled and publish normally, through
 WordPress's own mechanism, once it ends.
 
-A freeze can be turned on immediately, or configured as a scheduled window
-in the site's own timezone. Whether it is active is computed from the
-current time and stored configuration on every relevant request — it never
-depends on a WP-Cron event firing on time.
+A freeze can be turned on immediately, started for a set time (for example
+30 minutes, after which it ends by itself and can be extended if the
+deployment runs long), or configured as a scheduled window in the site's own
+timezone. Whether it is active is computed from the current time and stored
+configuration on every relevant request — it never depends on a WP-Cron event
+firing on time.
+
+**Pause comments and forms (optional)**
+
+Anything a visitor saves while a deployment runs can be lost when the database
+is replaced, the same as an editor's change. Under Coverage you can include
+visitor comments and form submissions in a freeze. Both are off by default.
+Visitors are told clearly that the form is paused; people who can bypass the
+freeze can still submit; WooCommerce orders and checkout are never paused.
+Contact Form 7, WPForms, Ninja Forms, Fluent Forms, Forminator, Formidable and
+Everest Forms were each checked on a real site; other forms can be added with a
+filter. The check happens when a submission arrives, never when a page is
+shown, so page caches cannot serve a stale state.
+
+**Freeze receipt**
+
+Every freeze leaves a receipt of what changed in the content while it ran:
+posts saved, created or trashed, estimated deletions, term changes, comments
+added, and how many visitor submissions were paused. A clean receipt tells your
+deploy that nothing it can see changed while the freeze was on, so the database
+it copied at the start is still complete; otherwise it lists exactly which posts
+to look at before anything is overwritten. It covers only the time the freeze
+was on. It is a detector, not a synchronizer: it does not merge databases, and it says so in
+the documentation.
+
+**For pipelines**
+
+`wp stillgate enable --for=30m`, `wp stillgate extend 15m`, `wp stillgate
+receipt --check`, and a REST API (`/wp-json/stillgate/v1`, authenticated with
+Application Passwords) let a CI job freeze, extend and release a site without
+SSH. A timed freeze unlocks by itself even if the job dies.
 
 **Bypass is capability-based, not role-based**
 
@@ -49,16 +81,17 @@ proceeds concurrently; the freeze protects everyone *else's* content.
 import`, and equivalent commands from other plugins are blocked the same
 way during a freeze; `--user=<account with bypass>` is the explicit way to
 act as a specific person from the command line. Stillgate's own `wp
-stillgate status|enable|disable|schedule` commands keep working,
-because they only change Stillgate's own state.
+stillgate` commands keep working, because they only change Stillgate's own
+state.
 
 **Security and privacy**
 
 Stillgate makes no outbound HTTP requests, sends no data to any
 external service, requires no account or license key, and collects no
-telemetry. It uses no custom database table — two options, both removed on
+telemetry. It uses no custom database table — four options, all removed on
 uninstall — and its small internal activity log never stores request
-payloads, message bodies, or IP addresses.
+payloads, message bodies, or IP addresses. The freeze receipt keeps counts,
+timestamps and post IDs only, never content or personal data.
 
 **Known limitations, stated plainly**
 
@@ -87,8 +120,13 @@ payloads, message bodies, or IP addresses.
   freeze.
 * WP-Cron keeps running; unrelated events are unaffected, and only
   publishing protected scheduled content is held back specifically.
-* Comments, Notes, users, plugins, themes, and general site settings are
-  out of scope.
+* Users, plugins, themes, and general site settings are out of scope.
+  Visitor comments and form submissions are paused only if you choose to, and
+  only for the form plugins listed above; comments inserted directly with
+  `wp_insert_comment()` (importers, `wp comment create`) are not paused.
+* The receipt only sees content saved through WordPress; a change written
+  straight to the database that does not touch the post's modified time is
+  invisible to it, and orders kept outside the posts table are not listed.
 * Operates per site on Multisite in this version; there is no
   network-wide freeze screen yet, and network activation or deactivation
   affects the current site's state only.
@@ -111,8 +149,10 @@ this plugin exposes are documented in the [GitHub repository](https://github.com
 
 No. Stillgate only restricts editorial *writes* from logged-in
 users without the bypass capability. Anonymous visitors, logged-in
-customers, comment submissions, and every other frontend read or write
-that is not editorial content stay unaffected.
+customers, and every other frontend read or write that is not editorial
+content stay unaffected. The only exception is one you choose: pausing
+visitor comments and form submissions for the length of a freeze, which is off
+by default.
 
 = Does this protect against database changes made outside WordPress? =
 
@@ -121,6 +161,31 @@ handling (admin screens, REST, XML-RPC, WP-CLI, WP-Cron), capability
 checks, and content functions. A direct database edit, a raw SQL script,
 or a completely separate application writing to the same database is
 outside anything a WordPress plugin can see or prevent.
+
+= Does this sync databases between environments? =
+
+No, and it deliberately does not try. Merging two databases that both changed
+needs knowledge of every plugin's tables and of which side wins each conflict;
+a plugin that guessed would eventually overwrite the wrong thing. What
+Stillgate does is make the risky moment safe: it keeps the database still while
+you copy it, and the receipt tells you afterwards whether anything changed, with
+the exact post IDs if it did. See the documentation in the repository.
+
+= Does this work with my form plugin? =
+
+Contact Form 7, WPForms, Ninja Forms, Fluent Forms, Forminator, Formidable and
+Everest Forms were each checked on a real site. Gravity Forms and Elementor
+Pro forms are recognized by their known request shapes but were not tested,
+because they are paid plugins. Any other form can be added with the
+`deployment_guard_form_requests` filter, which the repository documents.
+
+= Does this work with WooCommerce? =
+
+Checkout, orders and order notes keep working during a freeze. Pausing comments
+also pauses product reviews from visitors. Stock, sales counts and ratings
+change by themselves while a shop sells, so on a shop the receipt will list
+products as changed; the `deployment_guard_receipt_post_types` filter can leave
+them out.
 
 = Does WP-CLI bypass the freeze? =
 
@@ -167,6 +232,13 @@ deployment-guard`.
 WP-CLI (`wp stillgate disable`) and the `DEPLOYMENT_GUARD_FORCE`
 constant in `wp-config.php` both work independently of the
 `deployment_guard_bypass` capability.
+
+== Screenshots ==
+
+1. The control room: start a freeze for a set time, or until you end it, with an optional message for editors.
+2. A running timed freeze with its end time, buttons to extend it, and the receipt so far.
+3. The freeze receipt lists the posts that changed while the freeze was on, and how many comments were paused.
+4. What an editor sees: the status in the admin bar and a notice that explains the freeze.
 
 == Changelog ==
 
