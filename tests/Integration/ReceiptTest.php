@@ -191,6 +191,69 @@ final class ReceiptTest extends TestCase {
 		$this->assertSame( 0, $report['content']['changed_posts'] );
 	}
 
+	public function test_a_closed_receipt_keeps_what_changed_when_the_posts_are_saved_again(): void {
+		$post = $this->old_post();
+
+		$this->service->enable();
+		wp_update_post( array( 'ID' => $post, 'post_title' => 'Changed during' ) );
+		$this->service->disable();
+
+		$this->clock['now'] += 5;
+		sleep( 2 );
+		// A shop recalculating a rating, an editor fixing a typo: the post is
+		// saved again after the freeze, and must stay on the list of what
+		// the freeze let through.
+		wp_update_post( array( 'ID' => $post, 'post_title' => 'Saved again afterwards' ) );
+
+		$report = $this->receipt->report();
+
+		$this->assertSame( 1, $report['content']['changed_posts'] );
+		$this->assertSame( array( $post ), $report['content']['changed_ids'] );
+		$this->assertSame( array( $post ), $this->receipt->changed_ids() );
+		$this->assertFalse( $report['clean'] );
+	}
+
+	public function test_a_closed_receipt_keeps_its_comment_count_when_a_comment_is_deleted_later(): void {
+		$post = $this->old_post();
+
+		$this->service->enable();
+		$comment = self::factory()->comment->create( array( 'comment_post_ID' => $post, 'comment_approved' => '1' ) );
+		$this->service->disable();
+
+		wp_delete_comment( $comment, true );
+
+		$this->assertSame( 1, $this->receipt->report()['content']['comments_added'] );
+	}
+
+	public function test_the_post_types_the_receipt_inspects_can_be_narrowed_with_a_filter(): void {
+		$post = $this->old_post();
+		$page = self::factory()->post->create( array( 'post_type' => 'page', 'post_date' => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ), 'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ) ) );
+
+		add_filter(
+			'deployment_guard_receipt_post_types',
+			static fn ( array $types ): array => array_values( array_diff( $types, array( 'post' ) ) )
+		);
+
+		$this->service->enable();
+		wp_update_post( array( 'ID' => $post, 'post_title' => 'A product-like change the shop owner does not care about' ) );
+		wp_update_post( array( 'ID' => $page, 'post_title' => 'A page edit' ) );
+
+		$report = $this->receipt->report();
+
+		$this->assertSame( array( $page ), $report['content']['changed_ids'] );
+		$this->assertSame( 1, $report['content']['changed_posts'] );
+	}
+
+	public function test_a_broken_receipt_post_types_filter_falls_back_to_the_protected_types(): void {
+		$post = $this->old_post();
+		add_filter( 'deployment_guard_receipt_post_types', static fn () => 'nonsense' );
+
+		$this->service->enable();
+		wp_update_post( array( 'ID' => $post, 'post_title' => 'Changed' ) );
+
+		$this->assertSame( array( $post ), $this->receipt->report()['content']['changed_ids'] );
+	}
+
 	public function test_a_new_freeze_starts_a_new_receipt(): void {
 		$post = $this->old_post();
 

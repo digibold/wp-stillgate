@@ -169,9 +169,19 @@ final class Receipt {
 
 	private function close( int $at ): void {
 		$data = $this->data();
+		$from = (int) $data['opened'];
+
+		// What changed is fixed at the moment the freeze ends. Read later
+		// from the database it would shrink as posts are saved again (a shop
+		// recalculating a rating a second after the freeze ended would drop
+		// the product from the list a deploy script is about to export).
+		$final             = $this->capture();
+		$final['changed']  = $this->changed_posts( $from, $at );
+		$final['deleted']  = $this->deleted_estimate( is_array( $data['baseline'] ) ? $data['baseline'] : array(), $final, $from, $at );
+		$final['comments'] = $this->comments_added( $from, $at );
 
 		$data['closed'] = $at;
-		$data['final']  = $this->capture();
+		$data['final']  = $final;
 
 		$this->save( $data );
 	}
@@ -194,11 +204,13 @@ final class Receipt {
 		$open    = null === $data['closed'];
 		$from    = (int) $data['opened'];
 		$until   = $open ? null : (int) $data['closed'];
-		$current = $open || ! is_array( $data['final'] ) ? $this->capture() : $data['final'];
-		$changed = $this->changed_posts( $from, $until );
-		$deleted = $this->deleted_estimate( $data['baseline'], $current, $from, $until );
+		$final   = ! $open && is_array( $data['final'] ) ? $data['final'] : null;
+		$current = null === $final ? $this->capture() : $final;
+		$frozen  = null !== $final && isset( $final['changed'], $final['deleted'], $final['comments'] );
+		$changed = $frozen ? $final['changed'] : $this->changed_posts( $from, $until );
+		$deleted = $frozen ? (int) $final['deleted'] : $this->deleted_estimate( $data['baseline'], $current, $from, $until );
 		$terms   = $this->terms_changed( $data['baseline'], $current );
-		$added   = $this->comments_added( $from, $until );
+		$added   = $frozen ? (int) $final['comments'] : $this->comments_added( $from, $until );
 
 		return array(
 			'state'     => $open ? 'open' : 'closed',
@@ -234,6 +246,10 @@ final class Receipt {
 			return array();
 		}
 
+		if ( null !== $data['closed'] && is_array( $data['final'] ) && isset( $data['final']['changed']['ids'] ) ) {
+			return array_map( 'intval', (array) $data['final']['changed']['ids'] );
+		}
+
 		$until = null === $data['closed'] ? null : (int) $data['closed'];
 
 		return $this->changed_posts( (int) $data['opened'], $until )['ids'];
@@ -245,7 +261,7 @@ final class Receipt {
 	private function changed_posts( int $from, ?int $until ): array {
 		global $wpdb;
 
-		$types = $this->guard->protected_types()['post_types'];
+		$types = $this->post_types();
 
 		if ( ! $types ) {
 			return array(
@@ -282,6 +298,30 @@ final class Receipt {
 	}
 
 	/**
+	 * The post types the receipt inspects: by default the ones a freeze
+	 * protects.
+	 *
+	 * @return string[]
+	 */
+	private function post_types(): array {
+		$types = $this->guard->protected_types()['post_types'];
+
+		/**
+		 * Filters the post types the freeze receipt inspects.
+		 *
+		 * A shop whose products change on their own while it sells (stock,
+		 * sales counts, ratings) can leave them out so the receipt reports
+		 * editorial changes only. This does not change what a freeze
+		 * protects; see `deployment_guard_protected_types` for that.
+		 *
+		 * @param string[] $types Post type names.
+		 */
+		$filtered = apply_filters( 'deployment_guard_receipt_post_types', $types );
+
+		return is_array( $filtered ) ? array_values( array_filter( $filtered, 'is_string' ) ) : $types;
+	}
+
+	/**
 	 * Posts that were removed outright: the baseline total plus what was
 	 * created since, minus what is there now. An estimate, because a row
 	 * deleted from the database leaves nothing to inspect.
@@ -292,7 +332,7 @@ final class Receipt {
 	private function deleted_estimate( array $baseline, array $current, int $from, ?int $until ): int {
 		global $wpdb;
 
-		$types = $this->guard->protected_types()['post_types'];
+		$types = $this->post_types();
 
 		if ( ! $types ) {
 			return 0;
@@ -354,14 +394,15 @@ final class Receipt {
 		global $wpdb;
 
 		$types      = $this->guard->protected_types();
+		$post_types = $this->post_types();
 		$post_total = 0;
 		$terms      = '';
 
-		if ( $types['post_types'] ) {
-			$placeholders = implode( ', ', array_fill( 0, count( $types['post_types'] ), '%s' ) );
+		if ( $post_types ) {
+			$placeholders = implode( ', ', array_fill( 0, count( $post_types ), '%s' ) );
 
 			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- read-only one-off snapshot; the interpolated part is only a list of %s placeholders and every value goes through prepare().
-			$post_total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft'", $types['post_types'] ) );
+			$post_total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft'", $post_types ) );
 		}
 
 		if ( $types['taxonomies'] ) {

@@ -510,7 +510,7 @@ final class Guard {
 			return false;
 		}
 
-		if ( 'cron' !== $this->context() && current_user_can( Installer::CAPABILITY ) ) {
+		if ( 'cron' !== $this->context() && $this->actor_can_bypass_submissions() ) {
 			return false;
 		}
 
@@ -523,6 +523,25 @@ final class Guard {
 		 * @param string $kind   Either 'comments' or 'forms'.
 		 */
 		return (bool) apply_filters( 'deployment_guard_submissions_paused', true, $kind );
+	}
+
+	/**
+	 * Whether the person submitting can bypass the freeze. A browser form
+	 * that posts to a REST route (Contact Form 7 does) sends the login
+	 * cookie but no REST nonce, and WordPress then treats the request as
+	 * anonymous, which would refuse an administrator who is entitled to
+	 * submit. So when nobody is logged in for this request, the login cookie
+	 * itself is checked. It is signed and expires like any other, and this
+	 * only ever stops a refusal; it grants no access to anything.
+	 */
+	private function actor_can_bypass_submissions(): bool {
+		if ( is_user_logged_in() ) {
+			return current_user_can( Installer::CAPABILITY );
+		}
+
+		$user_id = wp_validate_auth_cookie( '', 'logged_in' );
+
+		return is_int( $user_id ) && $user_id > 0 && user_can( $user_id, Installer::CAPABILITY );
 	}
 
 	/**

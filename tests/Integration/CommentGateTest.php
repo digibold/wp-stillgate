@@ -68,6 +68,36 @@ final class CommentGateTest extends TestCase {
 		$this->assertCount( 0, get_comments( array( 'post_id' => $this->post_id, 'status' => 'all' ) ) );
 	}
 
+	public function test_a_refused_rest_comment_is_answered_with_423_not_500(): void {
+		$this->pause_comments();
+		add_filter( 'rest_allow_anonymous_comments', '__return_true' );
+
+		$request = new \WP_REST_Request( 'POST', '/wp/v2/comments' );
+		$request->set_body_params(
+			array(
+				'post'         => $this->post_id,
+				'content'      => 'Hello from the API',
+				'author_name'  => 'Visitor',
+				'author_email' => 'visitor@example.test',
+			)
+		);
+
+		$response = rest_do_request( $request );
+
+		$this->assertSame( 423, $response->get_status(), 'core would otherwise report a 500' );
+		$this->assertSame( 'stillgate_comments_paused', $response->get_data()['code'] );
+		$this->assertCount( 0, get_comments( array( 'post_id' => $this->post_id, 'status' => 'all' ) ) );
+	}
+
+	public function test_other_rest_errors_keep_their_own_status(): void {
+		$gate = new CommentGate( $this->make_guard( $this->service ), $this->receipt );
+
+		$error = new \WP_Error( 'rest_comment_exploded', 'No', array( 'status' => 409 ) );
+
+		$this->assertSame( $error, $gate->rest_status( $error ) );
+		$this->assertSame( 'kept', $gate->rest_status( 'kept' ) );
+	}
+
 	public function test_comments_are_untouched_when_the_scope_does_not_include_them(): void {
 		$this->service->set_scope( new Scope( false, true ) );
 		$this->service->enable();

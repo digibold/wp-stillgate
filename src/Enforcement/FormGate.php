@@ -58,10 +58,12 @@ final class FormGate {
 			'#^/gf/v2/forms/\d+/submissions#',
 		),
 		'post_fields'  => array(
-			'_wpcf7'       => null,
-			'gform_submit' => null,
-			'wpforms'      => null,
-			'frm_action'   => 'create',
+			'_wpcf7'        => null,
+			'gform_submit'  => null,
+			'wpforms'       => null,
+			'frm_action'    => 'create',
+			'everest_forms' => null,
+			'action'        => 'forminator_submit_form_custom-forms',
 		),
 	);
 
@@ -69,13 +71,21 @@ final class FormGate {
 
 	private Receipt $receipt;
 
-	public function __construct( Guard $guard, Receipt $receipt ) {
-		$this->guard   = $guard;
-		$this->receipt = $receipt;
+	private FormResponses $responses;
+
+	public function __construct( Guard $guard, Receipt $receipt, ?FormResponses $responses = null ) {
+		$this->guard     = $guard;
+		$this->receipt   = $receipt;
+		$this->responses = $responses ?? new FormResponses();
 	}
 
 	public function register(): void {
 		add_action( 'init', array( $this, 'guard_post_request' ), 1 );
+		// Some form plugins answer their admin-ajax.php action before
+		// admin_init fires (Formidable does, on wp_loaded), so the AJAX
+		// check runs on both. Whichever sees the request first refuses it;
+		// the other never runs.
+		add_action( 'init', array( $this, 'guard_ajax_request' ), 1 );
 		add_action( 'admin_init', array( $this, 'guard_ajax_request' ), 1 );
 		add_filter( 'rest_pre_dispatch', array( $this, 'guard_rest_request' ), 1, 3 );
 	}
@@ -84,7 +94,10 @@ final class FormGate {
 	 * Ordinary (non-AJAX, non-REST) form posts.
 	 */
 	public function guard_post_request(): void {
-		if ( ! Input::is_post() || wp_doing_ajax() || $this->looks_like_rest_request() ) {
+		// admin-ajax.php is the AJAX check's business. A front-end request
+		// that merely defines DOING_AJAX (Everest Forms does, for its own
+		// endpoint) is still an ordinary form post and is inspected here.
+		if ( ! Input::is_post() || ( wp_doing_ajax() && is_admin() ) || $this->looks_like_rest_request() ) {
 			return;
 		}
 
@@ -110,7 +123,9 @@ final class FormGate {
 			return;
 		}
 
-		if ( ! in_array( Input::key( 'action' ), $this->requests()['ajax_actions'], true ) ) {
+		$action = Input::key( 'action' );
+
+		if ( ! in_array( $action, $this->requests()['ajax_actions'], true ) ) {
 			return;
 		}
 
@@ -118,13 +133,13 @@ final class FormGate {
 			return;
 		}
 
-		wp_send_json_error(
-			array(
-				'code'    => 'stillgate_forms_paused',
-				'message' => $this->guard->visitor_message( Scope::FORMS ),
-			),
-			423
-		);
+		$answer = $this->responses->ajax( $action, $this->guard->visitor_message( Scope::FORMS ) );
+
+		if ( ! headers_sent() ) {
+			header( 'X-Stillgate-Paused: forms' );
+		}
+
+		wp_send_json( $answer['body'], $answer['status'] );
 	}
 
 	/**
@@ -153,9 +168,16 @@ final class FormGate {
 			return $result;
 		}
 
+		$message = $this->guard->visitor_message( Scope::FORMS );
+		$adapted = $this->responses->rest( $request->get_route(), $request, $message );
+
+		if ( null !== $adapted ) {
+			return $adapted;
+		}
+
 		return new \WP_Error(
-			'stillgate_forms_paused',
-			$this->guard->visitor_message( Scope::FORMS ),
+			FormResponses::CODE,
+			$message,
 			array( 'status' => 423 )
 		);
 	}

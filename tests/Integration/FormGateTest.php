@@ -116,6 +116,8 @@ final class FormGateTest extends TestCase {
 			'Gravity Forms'      => array( array( 'gform_submit' => '3', 'input_1' => 'A' ) ),
 			'WPForms'            => array( array( 'wpforms' => array( 'id' => '5', 'fields' => array( 'A' ) ) ) ),
 			'Formidable (create)' => array( array( 'frm_action' => 'create', 'form_id' => '2' ) ),
+			'Everest Forms'       => array( array( 'everest_forms' => array( 'id' => '8', 'form_fields' => array( 'A' ) ) ) ),
+			'Forminator (no AJAX)' => array( array( 'action' => 'forminator_submit_form_custom-forms', 'form_id' => '7' ) ),
 		);
 	}
 
@@ -125,6 +127,7 @@ final class FormGateTest extends TestCase {
 		foreach ( array(
 			array( 's' => 'search words' ),
 			array( 'frm_action' => 'update' ),
+			array( 'action' => 'some_other_action' ),
 			array( 'log' => 'user', 'pwd' => 'secret' ),
 			array( 'comment' => 'hi', 'comment_post_ID' => '1' ),
 		) as $fields ) {
@@ -204,22 +207,112 @@ final class FormGateTest extends TestCase {
 
 		$payload = $this->refused_ajax();
 
-		$this->assertNotNull( $payload );
-		$this->assertFalse( $payload['success'] );
-		$this->assertSame( 'stillgate_forms_paused', $payload['data']['code'] );
-		$this->assertStringContainsString( 'temporarily paused', $payload['data']['message'] );
+		$this->assertNotNull( $payload, $action );
+		$this->assertFalse( $payload['success'], $action );
+		$this->assertStringContainsString( 'temporarily paused', wp_json_encode( $payload ), $action );
 	}
 
 	public static function provide_ajax_actions(): array {
 		return array(
-			'WPForms'     => array( 'wpforms_submit' ),
-			'Ninja Forms' => array( 'nf_ajax_submit' ),
+			'WPForms'      => array( 'wpforms_submit' ),
+			'Ninja Forms'  => array( 'nf_ajax_submit' ),
 			'Fluent Forms' => array( 'fluentform_submit' ),
-			'Forminator'  => array( 'forminator_submit_form_custom-forms' ),
-			'Formidable'  => array( 'frm_entries_create' ),
-			'Elementor'   => array( 'elementor_pro_forms_send_form' ),
-			'Everest'     => array( 'everest_forms_ajax_form_submission' ),
+			'Forminator'   => array( 'forminator_submit_form_custom-forms' ),
+			'Formidable'   => array( 'frm_entries_create' ),
+			'Elementor'    => array( 'elementor_pro_forms_send_form' ),
+			'Everest'      => array( 'everest_forms_ajax_form_submission' ),
 		);
+	}
+
+	public function test_a_form_without_an_adapter_gets_the_plain_error_with_a_code(): void {
+		$this->pause_forms();
+		$this->as_post( array( 'action' => 'frm_entries_create' ) );
+
+		$payload = $this->refused_ajax();
+
+		$this->assertSame( 'stillgate_forms_paused', $payload['data']['code'] );
+		$this->assertStringContainsString( 'temporarily paused', $payload['data']['message'] );
+	}
+
+	public function test_the_ajax_gate_runs_on_init_as_well_as_admin_init(): void {
+		$this->gate->register();
+
+		$this->assertSame( 1, has_action( 'init', array( $this->gate, 'guard_ajax_request' ) ) );
+		$this->assertSame( 1, has_action( 'admin_init', array( $this->gate, 'guard_ajax_request' ) ) );
+	}
+
+	public function test_a_front_end_request_that_defines_doing_ajax_is_still_checked_as_a_post(): void {
+		$this->pause_forms();
+		set_current_screen( 'front' );
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', array( $this, 'get_wp_die_handler' ), 1, 1 );
+		$this->as_post( array( 'everest_forms' => array( 'id' => '8' ) ) );
+
+		try {
+			$this->assertNotNull( $this->refused_page(), 'DOING_AJAX alone does not exempt a front-end form post' );
+		} finally {
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+			remove_filter( 'wp_die_ajax_handler', array( $this, 'get_wp_die_handler' ), 1 );
+		}
+	}
+
+	public function test_a_real_admin_ajax_post_is_left_to_the_ajax_gate(): void {
+		$this->pause_forms();
+		set_current_screen( 'dashboard' );
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		$this->as_post( array( 'action' => 'forminator_submit_form_custom-forms' ) );
+
+		try {
+			$this->assertNull( $this->refused_page() );
+		} finally {
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+			set_current_screen( 'front' );
+		}
+	}
+
+	public function test_an_administrator_whose_rest_request_carries_only_the_cookie_is_not_refused(): void {
+		$this->pause_forms();
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( 0 );
+		$_COOKIE[ LOGGED_IN_COOKIE ] = wp_generate_auth_cookie( $admin_id, time() + HOUR_IN_SECONDS, 'logged_in' );
+
+		try {
+			$result = $this->gate->guard_rest_request( null, null, $this->rest_request( 'POST', '/gf/v2/forms/3/submissions' ) );
+
+			$this->assertNull( $result, 'a signed login cookie of somebody who can bypass the freeze lets the submission through' );
+			$this->assertSame( 0, $this->receipt->report()['paused']['forms'] );
+		} finally {
+			unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		}
+	}
+
+	public function test_a_forged_or_expired_login_cookie_does_not_bypass_the_pause(): void {
+		$this->pause_forms();
+		$admin_id = self::factory()->user->create( array( 'role' => 'administrator' ) );
+		wp_set_current_user( 0 );
+
+		try {
+			$_COOKIE[ LOGGED_IN_COOKIE ] = 'admin|' . ( time() + HOUR_IN_SECONDS ) . '|token|' . str_repeat( 'a', 64 );
+			$this->assertWPError( $this->gate->guard_rest_request( null, null, $this->rest_request( 'POST', '/gf/v2/forms/3/submissions' ) ), 'forged' );
+
+			$_COOKIE[ LOGGED_IN_COOKIE ] = wp_generate_auth_cookie( $admin_id, time() - HOUR_IN_SECONDS, 'logged_in' );
+			$this->assertWPError( $this->gate->guard_rest_request( null, null, $this->rest_request( 'POST', '/gf/v2/forms/3/submissions' ) ), 'expired' );
+		} finally {
+			unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		}
+	}
+
+	public function test_a_cookie_of_somebody_without_the_bypass_capability_does_not_bypass_the_pause(): void {
+		$this->pause_forms();
+		$user_id = self::factory()->user->create( array( 'role' => 'subscriber' ) );
+		wp_set_current_user( 0 );
+		$_COOKIE[ LOGGED_IN_COOKIE ] = wp_generate_auth_cookie( $user_id, time() + HOUR_IN_SECONDS, 'logged_in' );
+
+		try {
+			$this->assertWPError( $this->gate->guard_rest_request( null, null, $this->rest_request( 'POST', '/gf/v2/forms/3/submissions' ) ) );
+		} finally {
+			unset( $_COOKIE[ LOGGED_IN_COOKIE ] );
+		}
 	}
 
 	public function test_other_ajax_actions_are_not_touched(): void {
@@ -241,13 +334,31 @@ final class FormGateTest extends TestCase {
 	public function test_a_form_rest_route_is_refused_with_423(): void {
 		$this->pause_forms();
 
-		foreach ( array( '/contact-form-7/v1/contact-forms/12/feedback', '/contact-form-7/v1/contact-forms/abc1234/feedback', '/gf/v2/forms/3/submissions' ) as $route ) {
-			$result = $this->gate->guard_rest_request( null, null, $this->rest_request( 'POST', $route ) );
+		$result = $this->gate->guard_rest_request( null, null, $this->rest_request( 'POST', '/gf/v2/forms/3/submissions' ) );
 
-			$this->assertWPError( $result, $route );
-			$this->assertSame( 'stillgate_forms_paused', $result->get_error_code() );
-			$this->assertSame( 423, $result->get_error_data()['status'] );
+		$this->assertWPError( $result );
+		$this->assertSame( 'stillgate_forms_paused', $result->get_error_code() );
+		$this->assertSame( 423, $result->get_error_data()['status'] );
+	}
+
+	public function test_contact_form_7_is_answered_in_the_shape_its_script_displays(): void {
+		$this->pause_forms();
+
+		foreach ( array( '/contact-form-7/v1/contact-forms/12/feedback', '/contact-form-7/v1/contact-forms/abc1234/feedback' ) as $route ) {
+			$request = $this->rest_request( 'POST', $route );
+			$request->set_param( '_wpcf7_unit_tag', 'wpcf7-f12-p5-o1' );
+
+			$result = $this->gate->guard_rest_request( null, null, $request );
+
+			$this->assertInstanceOf( \WP_REST_Response::class, $result, $route );
+			$this->assertSame( 200, $result->get_status(), 'its script only reads a 2xx answer' );
+			$this->assertSame( 'aborted', $result->get_data()['status'] );
+			$this->assertSame( '#wpcf7-f12-p5-o1', $result->get_data()['into'] );
+			$this->assertStringContainsString( 'temporarily paused', $result->get_data()['message'] );
+			$this->assertSame( 'forms', $result->get_headers()['X-Stillgate-Paused'] );
 		}
+
+		$this->assertSame( 2, $this->receipt->report()['paused']['forms'] );
 	}
 
 	public function test_other_rest_requests_are_not_touched(): void {

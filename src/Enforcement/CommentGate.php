@@ -19,9 +19,11 @@ defined( 'ABSPATH' ) || exit;
  * When the site has chosen to pause comments (see Scope), this refuses new
  * ones with a clear message instead.
  *
- * It hooks `pre_comment_approved`, the one place every new comment passes
- * through however it arrives: the comment form, the REST API, XML-RPC,
- * pingbacks and trackbacks, and `wp comment create`. The check happens when
+ * It hooks `pre_comment_approved`, the one place every comment that comes
+ * in through `wp_new_comment()` passes: the comment form, the REST API,
+ * XML-RPC, pingbacks and trackbacks. A comment inserted straight with
+ * `wp_insert_comment()` (importers, `wp comment create`) does not pass
+ * through it, so it is not paused. The check happens when
  * the comment is submitted, never when a page is shown, so full-page caches
  * can neither cache a "comments closed" page that outlives the freeze nor
  * show a form that quietly fails.
@@ -50,6 +52,23 @@ final class CommentGate {
 
 	public function register(): void {
 		add_filter( 'pre_comment_approved', array( $this, 'filter_approval' ), 1, 2 );
+		add_filter( 'rest_request_after_callbacks', array( $this, 'rest_status' ), 10, 1 );
+	}
+
+	/**
+	 * The REST comments controller turns every error from the new comment
+	 * into a 500, which monitoring and CDNs read as the site failing.
+	 * Answer a paused comment with 423, like every other refusal.
+	 *
+	 * @param mixed $response The response, or an error, so far.
+	 * @return mixed
+	 */
+	public function rest_status( $response ) {
+		if ( is_wp_error( $response ) && 'stillgate_comments_paused' === $response->get_error_code() ) {
+			return new \WP_Error( 'stillgate_comments_paused', $response->get_error_message(), array( 'status' => 423 ) );
+		}
+
+		return $response;
 	}
 
 	/**
