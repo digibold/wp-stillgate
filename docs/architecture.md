@@ -182,8 +182,8 @@ assignments, or options directly are not blocked; see
 
 ## Suspension
 
-Stillgate's own `status`/`enable`/`disable`/`schedule` commands only
-read and write Stillgate's own two options, which no enforcement
+Stillgate's own `status`/`enable`/`extend`/`disable`/`schedule`/`scope`/
+`receipt`/`drift` commands only read and write Stillgate's own options, which no enforcement
 layer protects, so they keep working during a freeze without anything
 being relaxed for them. They still run inside `Suspension::run()`, a
 narrowly scoped internal guard, built so that the most it could ever
@@ -207,7 +207,7 @@ exempt is the command's own code — never anything else:
 
 ## Data model
 
-Two options, both created on activation and **not autoloaded** (an
+Six options, **none autoloaded** (an
 autoloaded option is rewritten as part of WordPress's combined
 `alloptions` blob on every write to *any* autoloaded option; with a
 persistent object cache, that read-modify-write race could put back a
@@ -217,15 +217,26 @@ stale freeze state):
   `schedule_end` (UTC Unix timestamps or `null`), `message`, `updated_at`,
   `updated_by`.
 - `deployment_guard_history` — see [Activity history](#activity-history).
+- `deployment_guard_scope` — `comments` and `forms` (bools): what a freeze
+  covers beyond editorial content. Created on first save; absent means both
+  off.
+- `deployment_guard_receipt` — see [The freeze receipt](#the-freeze-receipt).
+- `deployment_guard_paused_comments` and `deployment_guard_paused_forms` —
+  running totals of refused visitor submissions, each incremented in place with
+  one atomic SQL update (a read-modify-write through `update_option` would lose
+  counts under concurrent refusals, and could overwrite a receipt another
+  request had just closed). A receipt reports the totals less the totals when it
+  opened.
 
-`FreezeService` caches both in memory for the lifetime of the request, and
+`FreezeService` caches its configuration, the history and the scope in memory
+for the lifetime of the request, and
 invalidates that cache on the corresponding `add_option_*`/
 `update_option_*`/`delete_option_*` hooks — not only its own writes, but
 any write to the same option from anywhere, including a *different*
 `FreezeService` instance in the same process (which matters for WP-CLI
 sessions and the test suite, where the plugin's own bootstrap instance and
 a script's own instance can otherwise disagree) — and on `switch_blog`, so
-after `switch_to_blog()` both are read again from the site that is now
+after `switch_to_blog()` all three are read again from the site that is now
 current.
 
 `Guard` separately memoizes `is_restricted()` per `blog_id|user_id|context`
@@ -245,6 +256,107 @@ grow the option without bound. Nothing but a short, allowlisted context
 (vector, target, source, and similar) is ever stored: no request payload,
 IP address, or message body.
 
+## Visitor submissions
+
+Editorial enforcement only ever concerns logged-in people. Comments and form
+submissions come from visitors, so they are a separate, opt-in layer
+(`Scope`, stored in `deployment_guard_scope`, both off by default).
+
+The rule that shapes all of it: **the check is made when a submission
+arrives, never when a page is shown.** An anonymous page view never reads the
+freeze state, so a full-page cache can neither serve a stale "closed" state
+nor show a form that fails silently.
+
+`Guard::submissions_paused( $kind )` answers it: a freeze is active, the
+site chose to pause that kind, the actor cannot bypass the freeze, and the
+`deployment_guard_submissions_paused` filter agrees. Anonymous visitors and
+logged-in people without the bypass capability are paused alike; a person who
+can bypass is not. When nobody is logged in for a REST request, the signed
+login cookie is checked, because a browser form that posts to a REST route
+(Contact Form 7) sends the cookie but no nonce and WordPress then treats the
+request as anonymous. That check only ever stops a refusal.
+
+- **`CommentGate`** hooks `pre_comment_approved`, the one place every comment
+  that arrives through `wp_new_comment()` passes: the comment form, REST,
+  XML-RPC, pingbacks and trackbacks. Only visitor-written types are paused
+  (`comment`, `review`, `pingback`, `trackback`; filterable); WooCommerce
+  order notes and similar internal types are untouched. A comment inserted
+  with `wp_insert_comment()` directly (importers, `wp comment create`) does
+  not pass through it and is not paused. Core answers a failed new comment
+  with a 500 through REST; the gate maps its own error to 423.
+- **`FormGate`** recognizes a form submission by what the request looks like,
+  because WordPress has no single place every form passes through: an
+  admin-ajax.php `action`, a REST route, or a field in an ordinary POST (all
+  filterable with `deployment_guard_form_requests`). A request is inspected
+  only if it already looks like one of those. The AJAX check runs on both
+  `init` and `admin_init`, since some plugins answer before `admin_init`
+  (Formidable does, on `wp_loaded`), and a front-end request that only
+  defines `DOING_AJAX` (Everest Forms) is still inspected as a form post.
+- **`FormResponses`** shapes the refusal to what each plugin's own script
+  displays. A script that does not recognize the answer shows a spinner that
+  never stops or a generic error, so the visitor would not learn that the
+  form is paused. Unknown forms get a plain 423 JSON error with the code
+  `stillgate_forms_paused`. See [forms.md](forms.md) for what was run in a
+  browser and what was only read from the plugins' code.
+
+Each refusal increments a counter option (see the receipt below): one atomic
+database update per refused submission, and no scan of the database, because
+counting never opens a receipt on a visitor's request.
+
+## The freeze receipt
+
+`Receipt` answers "did anything change while we had it frozen?" It is a
+detector and only reads. It opens when a freeze begins and closes when it
+ends: through `deployment_guard_state_changed` for deliberate changes, and
+lazily on `admin_init` (logged-in users only, never anonymous page views) and
+on REST and WP-CLI requests for a scheduled window that started or ran out
+without anyone touching it. A window's start and end are taken from the
+schedule, not from when it was noticed.
+
+Edge cases the review of 0.2.0 turned up, and what is done about them:
+
+- A receipt left open by a window that ran out unnoticed is closed where that
+  window ended when the next freeze begins (`close_if_stale`), so the new
+  freeze does not inherit its start and count the idle gap as frozen.
+- A close is never dated before the receipt opened: the end of a leftover
+  expired window counts only if it ended during this receipt.
+- A scheduled window that began and ended with no request that could sync is
+  recorded afterwards as an unverified, closed receipt (within seven days of
+  it ending), so an older clean receipt is not read as the latest.
+- Counting a refusal never opens a receipt: opening scans the database, and
+  on a visitor's request in `init` the post types and taxonomies are not all
+  registered yet.
+
+Posts are compared by `post_modified_gmt` since the receipt opened, and by ID
+for new ones (a new draft's modified time is zero in WordPress). Deletions are
+estimated from row counts, terms are compared by a checksum, and visitor
+comments are counted. When the receipt closes, what changed is **snapshotted**:
+read live from the database later it would shrink as posts are saved again
+(a shop recalculating a rating after the freeze ended), and a close that is
+noticed late is bounded to when the freeze ended. A change made behind
+WordPress's back that does not touch the modification time cannot be seen.
+The post types inspected are the protected ones, narrowable with
+`deployment_guard_receipt_post_types` (a shop can leave out products whose
+stock and ratings change by themselves). [receipt.md](receipt.md) states the
+limits for users.
+
+## REST API
+
+`Rest\Controller` (`stillgate/v1`) exposes the same operations as the CLI, for
+pipelines. It adds no authentication of its own: reading needs
+`manage_options`, changing needs `manage_options` and the bypass capability,
+exactly like the settings screen. The routes sit outside the freeze's write
+protection because they only touch Stillgate's own state. See
+[rest-api.md](rest-api.md).
+
+## Admin surfaces
+
+The settings screen, the admin-bar pill, the one-click end/extend actions
+and the Site Health test are presentation over the same `FreezeService`. The
+admin bar is built only for logged-in users and appears only when there is
+something to show. The quick actions are nonce-protected links behind the
+settings screen's capability check.
+
 ## Multisite
 
 Stillgate operates per site. Activation installs only the site being
@@ -263,7 +375,7 @@ Stillgate's filter even has a chance to run — so a Super Admin is
 effectively always a bypass holder, on every site. Code that uses
 `switch_to_blog()` is enforced against the freeze state of the site it
 switched to. Uninstalling pages through every site on the network (100 at a
-time) to remove both options and the bypass capability everywhere.
+time) to remove all of its options and the bypass capability everywhere.
 
 ## The earlier "Deployment Guard" release
 
@@ -339,8 +451,11 @@ documented sequence for each way of removing the old copy.
 - **Restricted users lose some reads as well.** Previewing a draft and
   `context=edit` REST reads of protected content are unavailable to them
   during a freeze.
-- **Comments, Notes (WordPress 6.9+), users, plugins, themes, and general
-  site options are out of scope.**
+- **Notes (WordPress 6.9+), users, plugins, themes, and general site options
+  are out of scope.** Visitor comments and form submissions are out of scope
+  unless the site chose to pause them (see
+  [Visitor submissions](#visitor-submissions)); comments inserted directly with
+  `wp_insert_comment()` are not paused even then.
 - **REST batch requests and XML-RPC's `system.multicall` are not atomic.**
   A blocked sub-request does not undo ones that already succeeded earlier
   in the same batch.

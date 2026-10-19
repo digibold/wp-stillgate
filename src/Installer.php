@@ -56,7 +56,7 @@ final class Installer {
 	 * Install the current site: grant the bypass capability to every role
 	 * that already has `manage_options` (never only to "administrator" by
 	 * name, so a custom role with the same responsibility is covered),
-	 * and create the plugin's two options if they do not exist yet.
+	 * and create the plugin's state and history options if they do not exist yet.
 	 *
 	 * Idempotent, and safe to call after an administrator has
 	 * deliberately removed the capability from a role: it only grants the
@@ -113,6 +113,12 @@ final class Installer {
 	private static function uninstall_current_site(): void {
 		delete_option( FreezeService::OPTION_STATE );
 		delete_option( FreezeService::OPTION_HISTORY );
+		delete_option( FreezeService::OPTION_SCOPE );
+		delete_option( Receipt::OPTION );
+
+		foreach ( Scope::KINDS as $kind ) {
+			delete_option( Receipt::COUNTER_PREFIX . $kind );
+		}
 
 		self::revoke_capability_from_all_roles();
 	}

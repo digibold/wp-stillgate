@@ -55,6 +55,10 @@ if ( ! class_exists( 'WP_CLI', false ) ) {
 			self::$log[] = array( 'log', $message );
 		}
 
+		public static function line( $message = '' ): void {
+			self::$log[] = array( 'line', $message );
+		}
+
 		public static function halt( int $code ): void {
 			throw new \Digibold\DeploymentGuard\Tests\Support\CliExit( 'halt', $code );
 		}

@@ -476,6 +476,105 @@ final class Guard {
 	}
 
 	/**
+	 * Whether the current user natively holds any capability a freeze can
+	 * restrict, so a notice or the admin-bar indicator is worth showing
+	 * them. Deliberately broader than any single request's target: it
+	 * decides whether to inform, not whether something is blocked.
+	 */
+	public function could_be_affected(): bool {
+		foreach ( array( 'edit_posts', 'upload_files', 'edit_theme_options', 'edit_terms', 'assign_terms' ) as $cap ) {
+			if ( current_user_can( $cap ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+	/**
+	 * Whether visitor submissions of the given kind are paused for the
+	 * current request: a freeze is active, the site chose to pause that
+	 * kind (see Scope), and the actor is not somebody who can bypass the
+	 * freeze. Unlike is_restricted() this also covers anonymous visitors,
+	 * since they are exactly who comments and contact forms come from; it
+	 * is only ever asked at the moment a submission arrives, never on an
+	 * ordinary page view.
+	 *
+	 * @param string $kind One of Scope::KINDS.
+	 */
+	public function submissions_paused( string $kind ): bool {
+		if ( ! did_action( 'init' ) || $this->suspension->active() ) {
+			return false;
+		}
+
+		if ( ! $this->service->scope()->includes( $kind ) || ! $this->service->is_active() ) {
+			return false;
+		}
+
+		if ( 'cron' !== $this->context() && $this->actor_can_bypass_submissions() ) {
+			return false;
+		}
+
+		/**
+		 * Filters whether visitor submissions of a kind are paused right
+		 * now, once a freeze, the site's scope settings and the actor have
+		 * all said yes.
+		 *
+		 * @param bool   $paused Whether the submission is paused.
+		 * @param string $kind   Either 'comments' or 'forms'.
+		 */
+		return (bool) apply_filters( 'deployment_guard_submissions_paused', true, $kind );
+	}
+
+	/**
+	 * Whether the person submitting can bypass the freeze. A browser form
+	 * that posts to a REST route (Contact Form 7 does) sends the login
+	 * cookie but no REST nonce, and WordPress then treats the request as
+	 * anonymous, which would refuse an administrator who is entitled to
+	 * submit. So when nobody is logged in for this request, the login cookie
+	 * itself is checked. It is signed and expires like any other, and this
+	 * only ever stops a refusal; it grants no access to anything.
+	 */
+	private function actor_can_bypass_submissions(): bool {
+		if ( is_user_logged_in() ) {
+			return current_user_can( Installer::CAPABILITY );
+		}
+
+		$user_id = wp_validate_auth_cookie( '', 'logged_in' );
+
+		return is_int( $user_id ) && $user_id > 0 && user_can( $user_id, Installer::CAPABILITY );
+	}
+
+	/**
+	 * What a visitor is told when a submission is paused.
+	 *
+	 * @param string $kind One of Scope::KINDS.
+	 */
+	public function visitor_message( string $kind ): string {
+		$text = Scope::COMMENTS === $kind
+			? __( 'Comments are temporarily paused while the site is being updated.', 'stillgate' )
+			: __( 'Form submissions are temporarily paused while the site is being updated.', 'stillgate' );
+
+		$ends_at = $this->ends_at();
+
+		if ( null !== $ends_at ) {
+			$text .= ' ' . sprintf(
+				/* translators: %s: date and time submissions are expected to reopen. */
+				__( 'Please try again after %s.', 'stillgate' ),
+				$this->format_datetime( $ends_at )
+			);
+		} else {
+			$text .= ' ' . __( 'Please try again in a few minutes.', 'stillgate' );
+		}
+
+		/**
+		 * Filters the message shown to a visitor whose submission is paused.
+		 *
+		 * @param string $text Message text (plain text).
+		 * @param string $kind Either 'comments' or 'forms'.
+		 */
+		return (string) apply_filters( 'deployment_guard_visitor_message', $text, $kind );
+	}
+	/**
 	 * Whether a freeze is in effect right now, independent of any actor
 	 * or capability. Used only where there is no user to check a
 	 * capability against at all, such as post-by-email (which runs as

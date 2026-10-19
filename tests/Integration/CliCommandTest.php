@@ -20,6 +20,8 @@ use Digibold\DeploymentGuard\Tests\Support\CliExit;
  */
 final class CliCommandTest extends TestCase {
 
+	private \Digibold\DeploymentGuard\Receipt $receipt;
+
 	/**
 	 * @return array{0: Command, 1: \Digibold\DeploymentGuard\FreezeService}
 	 */
@@ -33,7 +35,10 @@ final class CliCommandTest extends TestCase {
 		\WP_CLI::reset_log();
 		$GLOBALS['dg_test_formatted_items'] = array();
 
-		return array( new Command( $service, $guard, $suspension ), $service );
+		$this->receipt = new \Digibold\DeploymentGuard\Receipt( $service, $guard, static fn (): int => time() );
+		$this->receipt->register();
+
+		return array( new Command( $service, $guard, $suspension, $this->receipt ), $service );
 	}
 
 	public function test_status_reports_as_json(): void {
@@ -252,5 +257,298 @@ final class CliCommandTest extends TestCase {
 		wp_using_ext_object_cache( false );
 
 		$this->assertNotEmpty( \WP_CLI::messages_of( 'warning' ) );
+	}
+	public function test_enable_for_starts_a_timed_freeze(): void {
+		list( $command, $service ) = $this->install();
+
+		$command->enable( array(), array( 'for' => '30m' ) );
+
+		$this->assertTrue( $service->is_active() );
+		$this->assertFalse( $service->config()->enabled );
+		$ends_at = $service->ends_at();
+		$this->assertNotNull( $ends_at );
+		$this->assertEqualsWithDelta( time() + 1800, $ends_at, 5 );
+	}
+
+	public function test_enable_for_with_a_message(): void {
+		list( $command, $service ) = $this->install();
+
+		$command->enable( array(), array( 'for' => '2h', 'message' => 'Deploying.' ) );
+
+		$this->assertSame( 'Deploying.', $service->config()->message );
+		$this->assertEqualsWithDelta( time() + 7200, $service->ends_at(), 5 );
+	}
+
+	public function test_enable_for_with_an_invalid_duration_is_a_usage_error(): void {
+		list( $command, $service ) = $this->install();
+
+		try {
+			$command->enable( array(), array( 'for' => 'soon' ) );
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode() );
+			$this->assertStringContainsString( 'Invalid --for', $exit->getMessage() );
+		}
+
+		$this->assertFalse( $service->is_active() );
+	}
+
+	public function test_enable_for_beyond_the_maximum_is_refused(): void {
+		list( $command, $service ) = $this->install();
+
+		try {
+			$command->enable( array(), array( 'for' => '8d' ) );
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode() );
+		}
+
+		$this->assertFalse( $service->is_active() );
+	}
+
+	public function test_extend_pushes_the_end_back(): void {
+		list( $command, $service ) = $this->install();
+		$command->enable( array(), array( 'for' => '10m' ) );
+		$before = $service->ends_at();
+
+		$command->extend( array( '15m' ), array() );
+
+		$this->assertSame( $before + 900, $service->ends_at() );
+	}
+
+	public function test_extend_without_a_running_window_is_an_error(): void {
+		list( $command, $service ) = $this->install();
+		$service->enable();
+
+		try {
+			$command->extend( array( '15m' ), array() );
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode() );
+			$this->assertStringContainsString( 'no running timed or scheduled freeze', $exit->getMessage() );
+		}
+	}
+
+	public function test_extend_with_a_missing_or_bad_duration_is_a_usage_error(): void {
+		list( $command ) = $this->install();
+
+		foreach ( array( array(), array( 'later' ) ) as $args ) {
+			try {
+				$command->extend( $args, array() );
+				$this->fail( 'Expected a CLI error.' );
+			} catch ( CliExit $exit ) {
+				$this->assertStringContainsString( 'Invalid duration', $exit->getMessage() );
+			}
+		}
+	}
+
+	public function test_status_reports_when_the_freeze_ends(): void {
+		list( $command, $service ) = $this->install();
+		$service->freeze_for( 600 );
+
+		$command->status( array(), array( 'format' => 'json' ) );
+
+		$printed = \WP_CLI::messages_of( 'print_value' );
+		$this->assertNotSame( '', $printed[0][0]['ends_at_utc'] );
+		$this->assertNotFalse( strtotime( $printed[0][0]['ends_at_utc'] ) );
+	}
+	public function test_scope_shows_and_sets_what_a_freeze_covers(): void {
+		list( $command, $service ) = $this->install();
+
+		$command->scope( array(), array() );
+		$this->assertContains( array( 'log', 'comments: off' ), \WP_CLI::$log );
+		$this->assertContains( array( 'log', 'forms: off' ), \WP_CLI::$log );
+
+		$command->scope( array(), array( 'comments' => 'on' ) );
+		$this->assertTrue( $service->scope()->comments );
+		$this->assertFalse( $service->scope()->forms );
+
+		$command->scope( array(), array( 'forms' => 'on', 'comments' => 'off' ) );
+		$this->assertFalse( $service->scope()->comments );
+		$this->assertTrue( $service->scope()->forms );
+	}
+
+	public function test_scope_rejects_a_value_that_is_not_on_or_off(): void {
+		list( $command, $service ) = $this->install();
+
+		try {
+			$command->scope( array(), array( 'comments' => 'yes' ) );
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertStringContainsString( 'Invalid --comments', $exit->getMessage() );
+		}
+
+		$this->assertTrue( $service->scope()->is_empty() );
+	}
+
+	public function test_status_reports_the_scope(): void {
+		list( $command, $service ) = $this->install();
+		$service->set_scope( new \Digibold\DeploymentGuard\Scope( true, false ) );
+
+		$command->status( array(), array( 'format' => 'json' ) );
+
+		$printed = \WP_CLI::messages_of( 'print_value' );
+		$this->assertSame( 'true', $printed[0][0]['scope_comments'] );
+		$this->assertSame( 'false', $printed[0][0]['scope_forms'] );
+	}
+
+	public function test_an_overlong_message_refuses_enable_before_anything_is_locked(): void {
+		list( $command, $service ) = $this->install();
+
+		foreach ( array( array(), array( 'for' => '30m' ) ) as $extra ) {
+			try {
+				$command->enable( array(), array_merge( $extra, array( 'message' => str_repeat( 'x', 501 ) ) ) );
+				$this->fail( 'Expected a CLI error.' );
+			} catch ( CliExit $exit ) {
+				$this->assertSame( 1, $exit->getCode() );
+			}
+
+			$this->assertFalse( $service->is_active(), 'a script under set -e must not be left with a running freeze' );
+		}
+	}
+
+	public function test_an_overlong_message_refuses_schedule_before_the_window_is_saved(): void {
+		list( $command, $service ) = $this->install();
+
+		try {
+			$command->schedule(
+				array(),
+				array(
+					'start'   => gmdate( 'Y-m-d H:i', time() + 3600 ),
+					'end'     => gmdate( 'Y-m-d H:i', time() + 7200 ),
+					'message' => str_repeat( 'x', 501 ),
+				)
+			);
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode() );
+		}
+
+		$this->assertNull( $service->config()->schedule_start );
+	}
+
+	public function test_disable_does_not_warn_about_a_window_that_already_ended(): void {
+		list( $command ) = $this->install();
+
+		update_option(
+			\Digibold\DeploymentGuard\FreezeService::OPTION_STATE,
+			array(
+				'schema'         => 1,
+				'enabled'        => false,
+				'schedule_start' => time() - 7200,
+				'schedule_end'   => time() - 3600,
+				'message'        => '',
+				'updated_at'     => time() - 7200,
+				'updated_by'     => 1,
+			)
+		);
+
+		$command->disable( array(), array() );
+
+		$this->assertSame( array(), \WP_CLI::messages_of( 'warning' ) );
+	}
+
+	public function test_receipt_check_fails_for_a_window_nobody_observed(): void {
+		list( $command, $service ) = $this->install();
+
+		// A window that began and ended without any request that could sync.
+		update_option(
+			\Digibold\DeploymentGuard\FreezeService::OPTION_STATE,
+			array(
+				'schema'         => 1,
+				'enabled'        => false,
+				'schedule_start' => time() - 7200,
+				'schedule_end'   => time() - 3600,
+				'message'        => '',
+				'updated_at'     => time() - 7200,
+				'updated_by'     => 1,
+			)
+		);
+
+		try {
+			$command->receipt( array(), array( 'format' => 'json', 'check' => true ) );
+			$this->fail( 'Expected exit status 1.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode(), 'a window nobody observed is not known to be clean' );
+		}
+
+		$printed = \WP_CLI::messages_of( 'print_value' );
+		$this->assertTrue( $printed[0][0]['unverified'] );
+		$this->assertNull( $printed[0][0]['clean'] );
+		$this->assertNotEmpty( \WP_CLI::messages_of( 'warning' ) );
+	}
+
+	public function test_receipt_without_any_freeze_is_an_error(): void {
+		list( $command ) = $this->install();
+
+		try {
+			$command->receipt( array(), array() );
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertStringContainsString( 'no receipt', $exit->getMessage() );
+		}
+	}
+
+	public function test_receipt_of_a_clean_freeze(): void {
+		list( $command, $service ) = $this->install();
+		$service->enable( 'cli' );
+		$service->disable( 'cli' );
+
+		$command->receipt( array(), array( 'format' => 'json', 'check' => true ) );
+
+		$printed = \WP_CLI::messages_of( 'print_value' );
+		$this->assertSame( 'closed', $printed[0][0]['state'] );
+		$this->assertTrue( $printed[0][0]['clean'] );
+	}
+
+	public function test_receipt_check_exits_with_1_when_content_changed(): void {
+		list( $command, $service ) = $this->install();
+		$post = self::factory()->post->create( array( 'post_date' => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ), 'post_modified' => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ), 'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ) ) );
+		$service->enable( 'cli' );
+		// A change made by somebody who may bypass the freeze (or by a
+		// plugin): the CLI context here is restricted, so touch the row directly.
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, array( 'post_modified_gmt' => gmdate( 'Y-m-d H:i:s' ) ), array( 'ID' => $post ) );
+
+		try {
+			$command->receipt( array(), array( 'check' => true ) );
+			$this->fail( 'Expected exit status 1.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode() );
+		}
+	}
+
+	public function test_receipt_table_lists_the_fields(): void {
+		list( $command, $service ) = $this->install();
+		$service->enable( 'cli' );
+
+		$command->receipt( array(), array() );
+
+		$fields = array_column( $GLOBALS['dg_test_formatted_items'][0][1], 'Field' );
+		foreach ( array( 'state', 'clean', 'changed_posts', 'changed_ids', 'paused_comments', 'paused_forms' ) as $expected ) {
+			$this->assertContains( $expected, $fields );
+		}
+	}
+
+	public function test_drift_prints_the_changed_ids_comma_separated(): void {
+		list( $command, $service ) = $this->install();
+		$old = gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS );
+		$one = self::factory()->post->create( array( 'post_date' => $old, 'post_modified' => $old, 'post_modified_gmt' => $old ) );
+		$two = self::factory()->post->create( array( 'post_date' => $old, 'post_modified' => $old, 'post_modified_gmt' => $old ) );
+		$service->enable( 'cli' );
+
+		// Edits by somebody allowed to bypass the freeze: this CLI context is
+		// restricted, so touch the rows directly.
+		global $wpdb;
+		foreach ( array( $one, $two ) as $id ) {
+			$wpdb->update( $wpdb->posts, array( 'post_modified_gmt' => gmdate( 'Y-m-d H:i:s' ) ), array( 'ID' => $id ) );
+		}
+
+		$command->drift( array(), array() );
+
+		$lines = \WP_CLI::messages_of( 'line' );
+		$ids   = explode( ',', (string) $lines[0] );
+		$this->assertContains( (string) $one, $ids );
+		$this->assertContains( (string) $two, $ids );
 	}
 }

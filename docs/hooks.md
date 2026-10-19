@@ -5,9 +5,9 @@ sites will never need any of these; they exist for the cases a filter on
 protected types or a plugin with its own write paths cannot otherwise be
 accommodated.
 
-The two filters marked **experimental** may still change shape in a `0.x`
+The filters marked **experimental** may still change shape in a `0.x`
 release without a major version bump; the rest are considered stable from
-`0.1.0`.
+the release that introduced them.
 
 ## `deployment_guard_protected_types` (filter, stable)
 
@@ -65,6 +65,112 @@ taxonomy's controller nor an instance of a core content controller) never
 reaches this filter; see
 [architecture.md](architecture.md#rest-target-resolution).
 
+## `deployment_guard_submissions_paused` (filter, experimental)
+
+```php
+apply_filters( 'deployment_guard_submissions_paused', bool $paused, string $kind );
+```
+
+Fires when a visitor submission arrives (never on an ordinary page view),
+after a freeze is active, the site chose to pause that `$kind` (`comments` or
+`forms`, see Coverage in the settings screen), and the person submitting is
+not somebody who can bypass the freeze. `$paused` is `true`. Return `false`
+to let this particular submission through, for example a form that must keep
+working during a freeze.
+
+To have a form plugin that Stillgate does not recognize paused, use the
+`deployment_guard_form_requests` filter below.
+
+## `deployment_guard_visitor_message` (filter, experimental)
+
+```php
+apply_filters( 'deployment_guard_visitor_message', string $text, string $kind );
+```
+
+The plain-text message a visitor sees when a comment or form submission is
+paused. `$kind` is `comments` or `forms`.
+
+```php
+add_filter(
+	'deployment_guard_visitor_message',
+	function ( string $text, string $kind ) {
+		return 'forms' === $kind
+			? 'Our forms are paused for maintenance until 14:00. Email hello@example.com instead.'
+			: $text;
+	},
+	10,
+	2
+);
+```
+
+## `deployment_guard_paused_comment_types` (filter, experimental)
+
+```php
+apply_filters( 'deployment_guard_paused_comment_types', string[] $types );
+```
+
+The comment types a pause on comments applies to. The default is the types a
+visitor can write: `comment` (also stored as an empty string), `review`,
+`pingback` and `trackback`. Internal types such as WooCommerce order notes are
+not in the list and keep working. Add a type from a plugin that stores visitor
+input as comments, or remove one.
+
+## `deployment_guard_form_requests` (filter, experimental)
+
+```php
+apply_filters( 'deployment_guard_form_requests', array $requests );
+```
+
+How Stillgate recognizes a visitor form submission. WordPress has no single
+place every form passes through, so a request is recognized by what it looks
+like. `$requests` has three keys:
+
+| Key | Matches | Value |
+| --- | --- | --- |
+| `ajax_actions` | the `action` of an `admin-ajax.php` request | list of strings |
+| `rest_routes` | the route of a `POST` REST request | list of regular expressions, matched against the route (for example `/contact-form-7/v1/contact-forms/12/feedback`) |
+| `post_fields` | an ordinary form `POST` | map of field name to the value it must have, or `null` for any value |
+
+The list of recognized forms and what each was checked against is in
+[forms.md](forms.md). To cover a form plugin that is not listed:
+
+```php
+add_filter(
+	'deployment_guard_form_requests',
+	function ( array $requests ) {
+		$requests['ajax_actions'][] = 'my_form_submit';
+		$requests['rest_routes'][]  = '#^/my-forms/v1/entries$#';
+		$requests['post_fields']['my_form_nonce'] = null;
+
+		return $requests;
+	}
+);
+```
+
+A key you leave out falls back to the built-in list for that kind; to recognize
+nothing of a kind, return it as an empty array. A return value that is not an
+array at all is ignored and the defaults are used.
+
+## `deployment_guard_receipt_post_types` (filter, experimental)
+
+```php
+apply_filters( 'deployment_guard_receipt_post_types', string[] $types );
+```
+
+The post types the [freeze receipt](receipt.md) inspects. The default is the
+post types a freeze protects. A shop whose products change by themselves while it
+sells (stock, sales counts, ratings) can leave them out so the receipt reports
+editorial changes only. This does not change what a freeze protects; see
+`deployment_guard_protected_types` for that. A return value that is not an array
+is ignored.
+
+```php
+add_filter(
+	'deployment_guard_receipt_post_types',
+	static fn ( array $types ): array => array_values( array_diff( $types, array( 'product' ) ) )
+);
+```
+
 ## `deployment_guard_blocked` (action, stable)
 
 ```php
@@ -85,11 +191,11 @@ do_action( 'deployment_guard_state_changed', array $new, array $old, string $sou
 ```
 
 Fires after every successful change to the freeze state (enable, disable,
-schedule, clear schedule, message, and the reset performed on
-deactivation). `$new` and `$old` are the state array shape
+schedule, clear schedule, timed freeze, extend, message, and the reset
+performed on deactivation). `$new` and `$old` are the state array shape
 (`FreezeConfig::to_array()`): `schema`, `enabled`, `schedule_start`,
 `schedule_end`, `message`, `updated_at`, `updated_by`, each a scalar or
-`null`. `$source` is `'ui'`, `'cli'`, or `'deactivation'`.
+`null`. `$source` is `'ui'`, `'cli'`, `'rest'`, or `'deactivation'`.
 
 A listener never inherits Stillgate's own internal CLI suspension
 (see [architecture.md](architecture.md#suspension)) — neither does any other

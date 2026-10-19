@@ -12,6 +12,9 @@ use Digibold\DeploymentGuard\FreezeConfig;
 use Digibold\DeploymentGuard\FreezeService;
 use Digibold\DeploymentGuard\Guard;
 use Digibold\DeploymentGuard\Installer;
+use Digibold\DeploymentGuard\Plugin;
+use Digibold\DeploymentGuard\Receipt;
+use Digibold\DeploymentGuard\Scope;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -33,18 +36,37 @@ final class SettingsPage {
 	private const PAGE_SLUG    = 'stillgate';
 	private const VIEW_CAP     = 'manage_options';
 
+	/**
+	 * Minutes offered as one-click timed freezes, and the extensions.
+	 *
+	 * @var int[]
+	 */
+	private const TIMER_CHOICES = array( 15, 30, 60, 120, 240 );
+
+	/**
+	 * @var int[]
+	 */
+	private const EXTEND_CHOICES = array( 15, 30, 60 );
+
 	private FreezeService $service;
 
 	private Guard $guard;
 
-	public function __construct( FreezeService $service, Guard $guard ) {
-		$this->service = $service;
-		$this->guard   = $guard;
+	private ?Receipt $receipt;
+
+	private string $assets_url;
+
+	public function __construct( FreezeService $service, Guard $guard, ?Receipt $receipt = null, string $assets_url = '' ) {
+		$this->service    = $service;
+		$this->guard      = $guard;
+		$this->receipt    = $receipt;
+		$this->assets_url = $assets_url;
 	}
 
 	public function register(): void {
 		add_action( 'admin_menu', array( $this, 'add_page' ) );
 		add_action( 'admin_post_deployment_guard_update', array( $this, 'handle_post' ) );
+		add_action( 'admin_enqueue_scripts', array( $this, 'enqueue_assets' ) );
 		add_filter( 'removable_query_args', array( $this, 'add_removable_query_args' ) );
 	}
 
@@ -56,6 +78,19 @@ final class SettingsPage {
 			self::PAGE_SLUG,
 			array( $this, 'render' )
 		);
+	}
+
+	/**
+	 * The stylesheet is loaded on this one screen only.
+	 *
+	 * @param string $hook_suffix The current admin page.
+	 */
+	public function enqueue_assets( $hook_suffix ): void {
+		if ( 'tools_page_' . self::PAGE_SLUG !== $hook_suffix || '' === $this->assets_url ) {
+			return;
+		}
+
+		wp_enqueue_style( 'stillgate-admin', $this->assets_url . 'admin.css', array(), Plugin::VERSION );
 	}
 
 	/**
@@ -97,7 +132,7 @@ final class SettingsPage {
 		}
 
 		$operation = isset( $_POST['operation'] ) ? sanitize_key( wp_unslash( $_POST['operation'] ) ) : '';
-		$allowed   = array( 'enable', 'disable', 'schedule', 'clear_schedule', 'message' );
+		$allowed   = array( 'enable', 'disable', 'schedule', 'clear_schedule', 'message', 'freeze_for', 'extend', 'scope' );
 
 		if ( ! in_array( $operation, $allowed, true ) ) {
 			wp_die( esc_html__( 'Unknown Stillgate action.', 'stillgate' ), '', array( 'response' => 400 ) );
@@ -117,7 +152,7 @@ final class SettingsPage {
 	 * @return string|\WP_Error
 	 */
 	private function process( string $operation, bool $confirm ) {
-		if ( in_array( $operation, array( 'enable', 'schedule' ), true ) && ! $confirm ) {
+		if ( in_array( $operation, array( 'enable', 'schedule', 'freeze_for' ), true ) && ! $confirm ) {
 			return new \WP_Error( 'confirmation_required', FreezeService::error_text( 'confirmation_required' ) );
 		}
 
@@ -145,9 +180,75 @@ final class SettingsPage {
 
 			case 'schedule':
 				return $this->process_schedule();
+
+			case 'freeze_for':
+				return $this->process_freeze_for();
+
+			case 'extend':
+				return $this->process_extend();
+
+			case 'scope':
+				// phpcs:ignore WordPress.Security.NonceVerification.Missing -- the nonce for this whole submission was already verified in resolve_redirect_url().
+				$comments = ! empty( $_POST['scope_comments'] );
+				$forms    = ! empty( $_POST['scope_forms'] ); // phpcs:ignore WordPress.Security.NonceVerification.Missing -- see above.
+
+				return $this->service->set_scope( new Scope( $comments, $forms ), 'ui' );
 		}
 
 		return new \WP_Error( 'unknown_operation', __( 'Unknown Stillgate action.', 'stillgate' ) );
+	}
+
+	/**
+	 * Start a freeze from the quick-start panel: for a number of minutes,
+	 * or until somebody ends it. An edited message is saved first, so a
+	 * message that is too long refuses the request before anything locks.
+	 *
+	 * @return string|\WP_Error
+	 */
+	private function process_freeze_for() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- the nonce for this whole submission was already verified in resolve_redirect_url().
+		$duration = isset( $_POST['duration'] ) ? sanitize_key( wp_unslash( $_POST['duration'] ) ) : '';
+		$minutes  = 'manual' === $duration ? 0 : absint( $duration );
+
+		// Nothing near a year is a plausible freeze, and the cap keeps the
+		// multiplication below well inside an integer.
+		if ( 'manual' !== $duration && ( $minutes < 1 || $minutes > 525600 ) ) {
+			return new \WP_Error( 'invalid_duration', FreezeService::error_text( 'invalid_duration' ) );
+		}
+
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- see above.
+		if ( isset( $_POST['message'] ) ) {
+			// phpcs:ignore WordPress.Security.NonceVerification.Missing -- see above.
+			$message = sanitize_textarea_field( wp_unslash( $_POST['message'] ) );
+
+			if ( $message !== $this->service->config()->message ) {
+				$saved = $this->service->set_message( $message, 'ui' );
+
+				if ( is_wp_error( $saved ) ) {
+					return $saved;
+				}
+			}
+		}
+
+		if ( 'manual' === $duration ) {
+			return $this->service->enable( 'ui' );
+		}
+
+		return $this->service->freeze_for( $minutes * MINUTE_IN_SECONDS, 'ui' );
+	}
+
+	/**
+	 * @return string|\WP_Error
+	 */
+	private function process_extend() {
+		// phpcs:ignore WordPress.Security.NonceVerification.Missing -- the nonce for this whole submission was already verified in resolve_redirect_url().
+		$minutes = isset( $_POST['by'] ) ? absint( wp_unslash( $_POST['by'] ) ) : 0;
+
+		if ( ! in_array( $minutes, self::EXTEND_CHOICES, true ) ) {
+			return new \WP_Error( 'invalid_duration', FreezeService::error_text( 'invalid_duration' ) );
+		}
+
+		return $this->service->extend( $minutes * MINUTE_IN_SECONDS, 'ui' );
 	}
 
 	/**
@@ -185,22 +286,29 @@ final class SettingsPage {
 		$now        = time();
 		$timezone   = wp_timezone();
 
-		echo '<div class="wrap">';
-		echo '<h1>' . esc_html__( 'Stillgate', 'stillgate' ) . '</h1>';
+		echo '<div class="wrap stillgate">';
+		echo '<h1 class="wp-heading-inline"><svg class="sg-mark" viewBox="0 0 128 192" width="18" height="27" aria-hidden="true" focusable="false"><path fill="currentColor" d="M128 0H56A56 56 0 0 0 45.23 110.95A24 24 0 0 1 47.6 78.48A24 24 0 0 1 56 32H128ZM0 192H72A56 56 0 0 0 82.77 81.05A24 24 0 0 1 80.4 113.52A24 24 0 0 1 72 160H0Z"/><circle cx="64" cy="96" r="16" fill="#d06f00"/></svg>' . esc_html__( 'Stillgate', 'stillgate' ) . '</h1>';
+		echo '<span class="sg-tagline">' . esc_html__( 'Editorial freeze for deployments', 'stillgate' ) . '</span>';
+		echo '<hr class="wp-header-end" />';
 
 		$this->render_notices();
-		$this->render_status_table( $config, $now, $timezone );
 
 		if ( ! $can_change ) {
-			echo '<div class="notice notice-warning"><p>' . esc_html__( 'You can view this screen because you can manage options, but you do not have the "deployment_guard_bypass" capability, so you cannot change the freeze from here.', 'stillgate' )
+			echo '<div class="notice notice-warning inline"><p>' . esc_html__( 'You can view this screen because you can manage options, but you do not have the "deployment_guard_bypass" capability, so you cannot change the freeze from here.', 'stillgate' )
 				. ' ' . esc_html__( 'Ask an administrator to grant it to your role, use WP-CLI, or set the DEPLOYMENT_GUARD_FORCE constant in wp-config.php.', 'stillgate' ) . '</p></div>';
 		}
 
-		echo '<hr />';
+		$this->render_hero( $config, $now, $timezone, $can_change );
 
-		$this->render_manual_form( $config, $now, $can_change );
-		$this->render_schedule_form( $config, $timezone, $can_change );
-		$this->render_message_form( $config, $can_change );
+		echo '<div class="sg-grid">';
+		$this->render_receipt_card( $timezone );
+		$this->render_scope_card( $can_change );
+		$this->render_schedule_card( $config, $now, $timezone, $can_change );
+		$this->render_message_card( $config, $can_change );
+		$this->render_pipelines_card();
+		$this->render_access_card( $config, $timezone );
+		echo '</div>';
+
 		$this->render_protected_summary();
 		$this->render_activity_table();
 
@@ -226,6 +334,18 @@ final class SettingsPage {
 		switch ( $code ) {
 			case 'enabled':
 				return __( 'Stillgate is now active.', 'stillgate' );
+			case 'timed':
+				$ends_at = $this->guard->ends_at();
+
+				return null !== $ends_at
+					? sprintf(
+						/* translators: %s: date and time the freeze ends by itself. */
+						__( 'Stillgate is now active and ends by itself on %s.', 'stillgate' ),
+						$this->format_datetime( $ends_at, wp_timezone() )
+					)
+					: __( 'Stillgate is now active.', 'stillgate' );
+			case 'extended':
+				return __( 'The freeze was extended.', 'stillgate' );
 			case 'disabled':
 				return __( 'Stillgate is now inactive.', 'stillgate' );
 			case 'scheduled':
@@ -234,6 +354,8 @@ final class SettingsPage {
 				return __( 'The scheduled freeze has been cleared.', 'stillgate' );
 			case 'message_saved':
 				return __( 'The message has been saved.', 'stillgate' );
+			case 'scope_saved':
+				return __( 'Coverage has been saved.', 'stillgate' );
 			case 'unchanged':
 				return __( 'Nothing changed.', 'stillgate' );
 			default:
@@ -241,150 +363,322 @@ final class SettingsPage {
 		}
 	}
 
-	private function render_status_table( FreezeConfig $config, int $now, \DateTimeZone $timezone ): void {
-		$forced          = $this->service->forced();
-		$active          = $this->service->is_active();
-		$ends_at         = $this->guard->ends_at();
-		$protected_types = $this->guard->protected_types();
+	/**
+	 * The status panel: what is happening right now, and the one or two
+	 * things somebody standing in front of it most likely wants to do.
+	 */
+	private function render_hero( FreezeConfig $config, int $now, \DateTimeZone $timezone, bool $can_change ): void {
+		$active   = $this->service->is_active();
+		$forced   = $this->service->forced();
+		$ends_at  = $this->guard->ends_at();
+		$upcoming = ! $active && 'upcoming' === $config->schedule_status( $now );
 
-		echo '<h2>' . esc_html__( 'Status', 'stillgate' ) . '</h2>';
-		echo '<table class="widefat striped" style="max-width:800px;">';
-		echo '<tbody>';
+		$modifier = $active ? 'active' : ( $upcoming ? 'upcoming' : 'idle' );
 
-		$this->status_row(
-			__( 'State', 'stillgate' ),
-			$active
-				? '<strong>' . esc_html__( 'Active — content changes are locked.', 'stillgate' ) . '</strong>'
-				: esc_html__( 'Inactive — no restrictions in effect.', 'stillgate' )
-		);
+		echo '<section class="sg-hero sg-hero--' . esc_attr( $modifier ) . '" aria-labelledby="sg-hero-title">';
+		echo '<div class="sg-hero__status">';
+		echo '<span class="sg-dot" aria-hidden="true"></span>';
+		echo '<div>';
+		echo '<p class="sg-eyebrow">' . esc_html__( 'Status', 'stillgate' ) . '</p>';
+
+		if ( $active ) {
+			echo '<h2 id="sg-hero-title">' . esc_html__( 'Content is frozen', 'stillgate' ) . '</h2>';
+		} elseif ( $upcoming ) {
+			echo '<h2 id="sg-hero-title">' . esc_html__( 'Open — a freeze is scheduled', 'stillgate' ) . '</h2>';
+		} else {
+			echo '<h2 id="sg-hero-title">' . esc_html__( 'Open — editing is not restricted', 'stillgate' ) . '</h2>';
+		}
+
+		echo '<p class="sg-hero__detail">' . esc_html( $this->hero_detail( $config, $now, $timezone, $active, $upcoming, $ends_at ) ) . '</p>';
 
 		if ( null !== $forced ) {
-			$this->status_row(
-				__( 'Forced by configuration', 'stillgate' ),
+			echo '<p class="sg-hero__forced">' . esc_html(
 				$forced
-					? esc_html__( 'Yes — DEPLOYMENT_GUARD_FORCE is set to true. It overrides the settings below.', 'stillgate' )
-					: esc_html__( 'Yes — DEPLOYMENT_GUARD_FORCE is set to false. It overrides the settings below.', 'stillgate' )
+					? __( 'DEPLOYMENT_GUARD_FORCE is set to true in wp-config.php: it overrides everything below.', 'stillgate' )
+					: __( 'DEPLOYMENT_GUARD_FORCE is set to false in wp-config.php: it overrides everything below.', 'stillgate' )
+			) . '</p>';
+		}
+
+		echo '</div></div>';
+
+		echo '<div class="sg-hero__actions">';
+
+		if ( $active ) {
+			$this->render_active_actions( $config, $now, $can_change );
+		} else {
+			$this->render_quick_start( $config, $can_change );
+		}
+
+		echo '</div></section>';
+	}
+
+	private function hero_detail( FreezeConfig $config, int $now, \DateTimeZone $timezone, bool $active, bool $upcoming, ?int $ends_at ): string {
+		if ( $active && null !== $ends_at ) {
+			return sprintf(
+				/* translators: 1: relative time such as "24 minutes", 2: date and time the freeze ends. */
+				__( 'Ends in %1$s, on %2$s.', 'stillgate' ),
+				human_time_diff( $now, $ends_at ),
+				$this->format_datetime( $ends_at, $timezone )
 			);
 		}
 
-		$this->status_row( __( 'Manual freeze', 'stillgate' ), $config->enabled ? esc_html__( 'On', 'stillgate' ) : esc_html__( 'Off', 'stillgate' ) );
-
-		$this->status_row( __( 'Schedule', 'stillgate' ), $this->schedule_summary( $config, $now, $timezone ) );
-
-		if ( null !== $ends_at ) {
-			$this->status_row( __( 'Expected to resume', 'stillgate' ), esc_html( $this->format_datetime( $ends_at, $timezone ) ) );
+		if ( $active ) {
+			return __( 'It stays on until somebody ends it.', 'stillgate' );
 		}
 
-		$this->status_row(
-			__( 'Site timezone', 'stillgate' ),
-			esc_html( wp_timezone_string() ) . ' &mdash; <a href="' . esc_url( admin_url( 'options-general.php' ) ) . '">' . esc_html__( 'change', 'stillgate' ) . '</a>'
-		);
-
-		$this->status_row(
-			__( 'Your account', 'stillgate' ),
-			current_user_can( Installer::CAPABILITY )
-				? esc_html__( 'Can bypass the freeze and change these settings.', 'stillgate' )
-				: esc_html__( 'Restricted while the freeze is active; cannot change these settings.', 'stillgate' )
-		);
-
-		$this->status_row( __( 'Protected content', 'stillgate' ), $this->protected_types_summary( $protected_types ) );
-
-		if ( $config->updated_at > 0 ) {
-			$this->status_row( __( 'Last changed', 'stillgate' ), esc_html( $this->format_datetime( $config->updated_at, $timezone ) ) . ' ' . $this->user_label( $config->updated_by ) );
+		if ( $upcoming && null !== $config->schedule_start && null !== $config->schedule_end ) {
+			return sprintf(
+				/* translators: 1: window start, 2: window end. */
+				__( 'Next freeze: %1$s to %2$s.', 'stillgate' ),
+				$this->format_datetime( $config->schedule_start, $timezone ),
+				$this->format_datetime( $config->schedule_end, $timezone )
+			);
 		}
 
-		echo '</tbody></table>';
-
-		echo '<h3>' . esc_html__( 'What a freeze does', 'stillgate' ) . '</h3>';
-		echo '<p>' . esc_html__( 'While active, users without the "deployment_guard_bypass" capability cannot create, edit, delete, or restore content of a protected type; cannot manage protected taxonomies, menus, widgets, or Customizer settings; and cannot use the Site Editor. Scheduled posts of a protected type do not publish while the freeze is active — they remain scheduled and publish normally once it ends.', 'stillgate' ) . '</p>';
-		echo '<p>' . esc_html__( 'Content changes made through the REST API, XML-RPC, WP-CLI, and WP-Cron events are blocked the same way. WP-Cron itself keeps running, and scheduled posts are held rather than lost. Changes that go around WordPress\'s own content functions and capability checks, such as direct database queries, cannot be blocked.', 'stillgate' ) . '</p>';
-		echo '<p>' . esc_html__( 'The public, logged-out frontend is never affected. Comments, users, plugins, themes, and general site settings are never affected. Users with the bypass capability, and Super Admins on Multisite, can always continue — but their changes can still be overwritten if a deployment or migration proceeds.', 'stillgate' ) . '</p>';
+		return __( 'Start one below before a deployment or migration, or schedule a window.', 'stillgate' );
 	}
 
-	private function status_row( string $label, string $value_html ): void {
-		echo '<tr><th scope="row" style="width:220px;">' . esc_html( $label ) . '</th><td>' . $value_html . '</td></tr>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- $value_html is pre-escaped by each caller.
-	}
+	private function render_active_actions( FreezeConfig $config, int $now, bool $can_change ): void {
+		$extendable = ! $config->enabled && 'active' === $config->schedule_status( $now );
 
-	private function schedule_summary( FreezeConfig $config, int $now, \DateTimeZone $timezone ): string {
-		if ( null === $config->schedule_start ) {
-			return esc_html__( 'None configured.', 'stillgate' );
+		if ( $extendable ) {
+			echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" class="sg-inline-form">';
+			wp_nonce_field( self::NONCE_ACTION );
+			echo '<input type="hidden" name="action" value="deployment_guard_update" />';
+			echo '<input type="hidden" name="operation" value="extend" />';
+			echo '<span class="sg-actions-label" id="sg-extend-label">' . esc_html__( 'Taking longer?', 'stillgate' ) . '</span> ';
+			echo '<span role="group" aria-labelledby="sg-extend-label">';
+
+			foreach ( self::EXTEND_CHOICES as $minutes ) {
+				echo '<button type="submit" class="button" name="by" value="' . (int) $minutes . '"' . disabled( $can_change, false, false ) . '>' . esc_html( $this->extend_label( $minutes ) ) . '</button> ';
+			}
+
+			echo '</span>';
+			echo '</form>';
 		}
 
-		$status = $config->schedule_status( $now );
+		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" class="sg-inline-form">';
+		wp_nonce_field( self::NONCE_ACTION );
+		echo '<input type="hidden" name="action" value="deployment_guard_update" />';
+		echo '<button type="submit" class="button button-primary sg-button-end" name="operation" value="disable"' . disabled( $can_change, false, false ) . '>' . esc_html__( 'End freeze now', 'stillgate' ) . '</button>';
+		echo '</form>';
 
-		$label = array(
-			'upcoming' => __( 'Upcoming', 'stillgate' ),
-			'active'   => __( 'Currently active', 'stillgate' ),
-			'expired'  => __( 'Expired', 'stillgate' ),
-		)[ $status ] ?? $status;
+		if ( ! $config->enabled && ! $extendable ) {
+			echo '<p class="description">' . esc_html__( 'The freeze is active because of the schedule below, not because of a manual switch.', 'stillgate' ) . '</p>';
+		}
+	}
+
+	private function extend_label( int $minutes ): string {
+		if ( $minutes >= 60 ) {
+			return sprintf(
+				/* translators: %d: number of hours to extend the freeze by. */
+				_n( '+%d hour', '+%d hours', intdiv( $minutes, 60 ), 'stillgate' ),
+				intdiv( $minutes, 60 )
+			);
+		}
 
 		return sprintf(
-			/* translators: 1: status label, 2: start date and time, 3: end date and time. */
-			esc_html__( '%1$s: %2$s to %3$s', 'stillgate' ),
-			esc_html( $label ),
-			esc_html( $this->format_datetime( $config->schedule_start, $timezone ) ),
-			esc_html( $this->format_datetime( $config->schedule_end, $timezone ) )
+			/* translators: %d: number of minutes to extend the freeze by. */
+			__( '+%d min', 'stillgate' ),
+			$minutes
 		);
 	}
 
-	private function protected_types_summary( array $protected_types ): string {
-		$post_type_labels = array();
-
-		foreach ( $protected_types['post_types'] as $post_type ) {
-			$object             = get_post_type_object( $post_type );
-			$post_type_labels[] = $object ? $object->labels->name : $post_type;
+	private function timer_label( int $minutes ): string {
+		if ( $minutes >= 60 ) {
+			return sprintf(
+				/* translators: %d: number of hours. */
+				_n( '%d hour', '%d hours', intdiv( $minutes, 60 ), 'stillgate' ),
+				intdiv( $minutes, 60 )
+			);
 		}
 
-		$taxonomy_labels = array();
-
-		foreach ( $protected_types['taxonomies'] as $taxonomy ) {
-			$object            = get_taxonomy( $taxonomy );
-			$taxonomy_labels[] = $object ? $object->labels->name : $taxonomy;
-		}
-
-		$parts = array();
-
-		if ( $post_type_labels ) {
-			$parts[] = esc_html( implode( ', ', $post_type_labels ) );
-		}
-
-		if ( $taxonomy_labels ) {
-			$parts[] = esc_html( implode( ', ', $taxonomy_labels ) );
-		}
-
-		$parts[] = esc_html__( 'menus, widgets, the Customizer, and the Site Editor', 'stillgate' );
-
-		return implode( '; ', $parts );
+		return sprintf(
+			/* translators: %d: number of minutes. */
+			__( '%d min', 'stillgate' ),
+			$minutes
+		);
 	}
 
-	private function render_manual_form( FreezeConfig $config, int $now, bool $can_change ): void {
-		$active_now = $config->is_active( $now );
+	/**
+	 * One form, pick a length and go: the common case of a deployment,
+	 * with a timer so it can never be left on by accident.
+	 */
+	private function render_quick_start( FreezeConfig $config, bool $can_change ): void {
+		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '" class="sg-quick">';
+		wp_nonce_field( self::NONCE_ACTION );
+		echo '<input type="hidden" name="action" value="deployment_guard_update" />';
+		echo '<input type="hidden" name="operation" value="freeze_for" />';
 
-		echo '<h2>' . esc_html__( 'Manual freeze', 'stillgate' ) . '</h2>';
+		echo '<fieldset class="sg-pills"><legend>' . esc_html__( 'Freeze for', 'stillgate' ) . '</legend>';
+
+		foreach ( self::TIMER_CHOICES as $index => $minutes ) {
+			$id = 'sg-for-' . $minutes;
+			echo '<span class="sg-pill"><input type="radio" id="' . esc_attr( $id ) . '" name="duration" value="' . (int) $minutes . '"' . checked( 1 === $index, true, false ) . ' /><label for="' . esc_attr( $id ) . '">' . esc_html( $this->timer_label( $minutes ) ) . '</label></span>';
+		}
+
+		echo '<span class="sg-pill"><input type="radio" id="sg-for-manual" name="duration" value="manual" /><label for="sg-for-manual">' . esc_html__( 'Until I end it', 'stillgate' ) . '</label></span>';
+		echo '</fieldset>';
+
+		echo '<p><label for="sg-quick-message" class="sg-label">' . esc_html__( 'Message to editors (optional)', 'stillgate' ) . '</label>';
+		echo '<input type="text" id="sg-quick-message" name="message" class="large-text" maxlength="' . (int) FreezeConfig::MAX_MESSAGE_LENGTH . '" value="' . esc_attr( $config->message ) . '" placeholder="' . esc_attr__( 'Deploying release 12, back in 30 minutes.', 'stillgate' ) . '" /></p>';
+
+		if ( null !== $config->schedule_start ) {
+			echo '<p class="description">' . esc_html__( 'Starting a freeze here replaces the scheduled window.', 'stillgate' ) . '</p>';
+		}
+
+		echo '<p><label><input type="checkbox" name="confirm" value="1" required /> ' . esc_html__( 'I understand this will lock editing for other users.', 'stillgate' ) . '</label></p>';
+		echo '<button type="submit" class="button button-primary button-hero sg-button-start"' . disabled( $can_change, false, false ) . '>' . esc_html__( 'Start freeze', 'stillgate' ) . '</button>';
+		echo '</form>';
+	}
+
+	/**
+	 * A card with a heading, so every section reads the same way.
+	 */
+	private function open_card( string $id, string $title, string $extra_class = '' ): void {
+		echo '<section class="sg-card ' . esc_attr( $extra_class ) . '" aria-labelledby="' . esc_attr( $id ) . '">';
+		echo '<h2 id="' . esc_attr( $id ) . '">' . esc_html( $title ) . '</h2>';
+	}
+
+	private function close_card(): void {
+		echo '</section>';
+	}
+
+	private function render_receipt_card( \DateTimeZone $timezone ): void {
+		$this->open_card( 'sg-receipt-title', __( 'Freeze receipt', 'stillgate' ) );
+
+		$report = null === $this->receipt ? array( 'state' => 'none' ) : $this->receipt->report();
+
+		if ( 'none' === $report['state'] ) {
+			echo '<p>' . esc_html__( 'No freeze has run yet. After one, this shows whether anything changed while it was on, so you know a database dump taken at the start is still complete.', 'stillgate' ) . '</p>';
+			$this->close_card();
+
+			return;
+		}
+
+		if ( ! empty( $report['unverified'] ) ) {
+			echo '<p class="sg-receipt sg-receipt--dirty"><span class="sg-receipt__mark" aria-hidden="true">?</span> ' . esc_html__( 'Nobody was there to see this freeze.', 'stillgate' ) . '</p>';
+			echo '<p class="description">' . esc_html(
+				sprintf(
+					/* translators: 1: freeze start, 2: freeze end. */
+					__( 'A scheduled freeze ran from %1$s to %2$s without any request that could record it, so what changed during it is not known.', 'stillgate' ),
+					$this->format_datetime( (int) strtotime( (string) $report['opened_at'] ), $timezone ),
+					$this->format_datetime( (int) strtotime( (string) $report['closed_at'] ), $timezone )
+				)
+			) . '</p>';
+			$this->close_card();
+
+			return;
+		}
+
+		$clean   = ! empty( $report['clean'] );
+		$content = $report['content'];
+		$open    = 'open' === $report['state'];
+
+		echo '<p class="sg-receipt sg-receipt--' . ( $clean ? 'clean' : 'dirty' ) . '"><span class="sg-receipt__mark" aria-hidden="true">' . ( $clean ? '&#10003;' : '!' ) . '</span> ';
+
+		if ( $clean ) {
+			echo esc_html( $open ? __( 'Nothing has changed so far.', 'stillgate' ) : __( 'Nothing changed while the freeze was on.', 'stillgate' ) );
+		} elseif ( (int) $content['changed_posts'] > 0 ) {
+			echo esc_html(
+				sprintf(
+					/* translators: %d: number of posts that changed. */
+					_n( '%d post changed during the freeze.', '%d posts changed during the freeze.', (int) $content['changed_posts'], 'stillgate' ),
+					(int) $content['changed_posts']
+				)
+			);
+		} else {
+			echo esc_html__( 'Content changed during the freeze.', 'stillgate' );
+		}
+
+		echo '</p>';
+
+		$opened = $this->format_datetime( (int) strtotime( (string) $report['opened_at'] ), $timezone );
+
+		echo '<p class="description">' . esc_html(
+			null === $report['closed_at']
+				? sprintf(
+					/* translators: %s: when the running freeze began. */
+					__( 'Since %s', 'stillgate' ),
+					$opened
+				)
+				: sprintf(
+					/* translators: 1: freeze start, 2: freeze end. */
+					__( '%1$s to %2$s', 'stillgate' ),
+					$opened,
+					$this->format_datetime( (int) strtotime( (string) $report['closed_at'] ), $timezone )
+				)
+		) . '</p>';
+
+		echo '<ul class="sg-facts">';
+		$this->fact( (int) $content['changed_posts'], __( 'posts saved, created or trashed', 'stillgate' ) );
+		$this->fact( (int) $content['deleted_estimate'], __( 'posts removed (estimate)', 'stillgate' ) );
+		$this->fact( ! empty( $content['terms_changed'] ) ? 1 : 0, __( 'term changes', 'stillgate' ), true );
+		$this->fact( (int) $content['comments_added'], __( 'comments added', 'stillgate' ) );
+		echo '</ul>';
+
+		$paused = $report['paused'];
+
+		if ( $paused[ Scope::COMMENTS ] > 0 || $paused[ Scope::FORMS ] > 0 ) {
+			echo '<p class="description">' . esc_html(
+				sprintf(
+					/* translators: 1: number of comments paused, 2: number of form submissions paused. */
+					__( 'Paused visitors: %1$d comments, %2$d form submissions.', 'stillgate' ),
+					(int) $paused[ Scope::COMMENTS ],
+					(int) $paused[ Scope::FORMS ]
+				)
+			) . '</p>';
+		}
+
+		if ( ! $clean && $content['changed_ids'] ) {
+			$links = array();
+
+			foreach ( array_slice( $content['changed_ids'], 0, 10 ) as $post_id ) {
+				$title   = get_the_title( (int) $post_id );
+				$links[] = '<a href="' . esc_url( (string) get_edit_post_link( (int) $post_id ) ) . '">' . esc_html( '' !== $title ? $title : '#' . (int) $post_id ) . '</a>';
+			}
+
+			echo '<p class="sg-changed">' . wp_kses( implode( ', ', $links ), array( 'a' => array( 'href' => array() ) ) ) . ( count( $content['changed_ids'] ) > 10 ? '&hellip;' : '' ) . '</p>';
+			echo '<p class="description">' . esc_html__( 'To carry these over to another environment with WordPress’s own export:', 'stillgate' ) . '</p>';
+			echo '<pre class="sg-code">wp export --post__in="$(wp stillgate drift)"</pre>';
+		}
+
+		$this->close_card();
+	}
+
+	private function fact( int $count, string $label, bool $as_yes_no = false ): void {
+		$value = $as_yes_no ? ( $count > 0 ? __( 'some', 'stillgate' ) : '0' ) : (string) $count;
+
+		echo '<li><strong>' . esc_html( $value ) . '</strong> ' . esc_html( $label ) . '</li>';
+	}
+
+	private function render_scope_card( bool $can_change ): void {
+		$scope = $this->service->scope();
+
+		$this->open_card( 'sg-scope-title', __( 'Coverage', 'stillgate' ) );
+		echo '<p>' . esc_html__( 'A freeze always locks editing of content, media, menus and widgets. It can also pause what visitors send in, because anything saved to the database during a deployment or migration can be lost when the database is replaced.', 'stillgate' ) . '</p>';
 
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 		wp_nonce_field( self::NONCE_ACTION );
 		echo '<input type="hidden" name="action" value="deployment_guard_update" />';
+		echo '<input type="hidden" name="operation" value="scope" />';
 
-		if ( $config->enabled ) {
-			echo '<p>' . esc_html__( 'The freeze is currently turned on manually.', 'stillgate' ) . '</p>';
-			echo '<button type="submit" class="button" name="operation" value="disable"' . disabled( $can_change, false, false ) . '>' . esc_html__( 'Turn off freeze', 'stillgate' ) . '</button>';
-		} else {
-			echo '<p>' . esc_html__( 'Turning this on immediately locks protected content for every user without the bypass capability, until you turn it off again.', 'stillgate' ) . '</p>';
-			echo '<div class="notice notice-warning inline"><p>' . esc_html__( 'Editors will be unable to save changes while this is on. Make sure any in-progress work is saved first.', 'stillgate' ) . '</p></div>';
-			echo '<p><label><input type="checkbox" name="confirm" value="1" required /> ' . esc_html__( 'I understand this will lock editing for other users.', 'stillgate' ) . '</label></p>';
-			echo '<button type="submit" class="button button-primary" name="operation" value="enable"' . disabled( $can_change, false, false ) . '>' . esc_html__( 'Turn on freeze now', 'stillgate' ) . '</button>';
-		}
+		echo '<fieldset><legend class="screen-reader-text">' . esc_html__( 'Pause these during a freeze', 'stillgate' ) . '</legend>';
+		echo '<p><label><input type="checkbox" name="scope_comments" value="1"' . checked( $scope->comments, true, false ) . disabled( $can_change, false, false ) . ' /> <strong>' . esc_html__( 'Visitor comments', 'stillgate' ) . '</strong></label><br />';
+		echo '<span class="description">' . esc_html__( 'New comments, reviews, pingbacks and trackbacks are refused with a friendly message. Order notes and other internal comments keep working.', 'stillgate' ) . '</span></p>';
+		echo '<p><label><input type="checkbox" name="scope_forms" value="1"' . checked( $scope->forms, true, false ) . disabled( $can_change, false, false ) . ' /> <strong>' . esc_html__( 'Contact and other forms', 'stillgate' ) . '</strong></label><br />';
+		echo '<span class="description">' . esc_html__( 'Visitor submissions to the common form plugins are refused; tested with Contact Form 7, WPForms, Ninja Forms, Fluent Forms, Forminator, Formidable and Everest Forms. Shops keep taking orders.', 'stillgate' ) . '</span></p>';
+		echo '</fieldset>';
 
+		echo '<button type="submit" class="button"' . disabled( $can_change, false, false ) . '>' . esc_html__( 'Save', 'stillgate' ) . '</button>';
+		echo '<p class="description sg-save-note">' . esc_html__( 'Applies at once, even to a freeze that is already running.', 'stillgate' ) . '</p>';
 		echo '</form>';
-
-		if ( $active_now && ! $config->enabled ) {
-			echo '<p class="description">' . esc_html__( 'The freeze is currently active because of the schedule below, not because of this manual switch.', 'stillgate' ) . '</p>';
-		}
+		$this->close_card();
 	}
 
-	private function render_schedule_form( FreezeConfig $config, \DateTimeZone $timezone, bool $can_change ): void {
-		echo '<h2>' . esc_html__( 'Scheduled freeze window', 'stillgate' ) . '</h2>';
+	private function render_schedule_card( FreezeConfig $config, int $now, \DateTimeZone $timezone, bool $can_change ): void {
+		$this->open_card( 'sg-schedule-title', __( 'Scheduled freeze window', 'stillgate' ) );
+		echo '<p>' . esc_html( $this->schedule_text( $config, $now, $timezone ) ) . '</p>';
 
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 		wp_nonce_field( self::NONCE_ACTION );
@@ -420,10 +714,31 @@ final class SettingsPage {
 
 		echo '</fieldset>';
 		echo '</form>';
+		$this->close_card();
 	}
 
-	private function render_message_form( FreezeConfig $config, bool $can_change ): void {
-		echo '<h2>' . esc_html__( 'Message shown to editors', 'stillgate' ) . '</h2>';
+	private function schedule_text( FreezeConfig $config, int $now, \DateTimeZone $timezone ): string {
+		if ( null === $config->schedule_start || null === $config->schedule_end ) {
+			return __( 'No window is scheduled.', 'stillgate' );
+		}
+
+		$labels = array(
+			'upcoming' => __( 'Upcoming', 'stillgate' ),
+			'active'   => __( 'Running now', 'stillgate' ),
+			'expired'  => __( 'Finished', 'stillgate' ),
+		);
+
+		return sprintf(
+			/* translators: 1: status label, 2: start date and time, 3: end date and time. */
+			__( '%1$s: %2$s to %3$s', 'stillgate' ),
+			$labels[ $config->schedule_status( $now ) ] ?? $config->schedule_status( $now ),
+			$this->format_datetime( $config->schedule_start, $timezone ),
+			$this->format_datetime( $config->schedule_end, $timezone )
+		);
+	}
+
+	private function render_message_card( FreezeConfig $config, bool $can_change ): void {
+		$this->open_card( 'sg-message-title', __( 'Message shown to editors', 'stillgate' ) );
 
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';
 		wp_nonce_field( self::NONCE_ACTION );
@@ -440,30 +755,116 @@ final class SettingsPage {
 		echo '<button type="submit" class="button button-primary" name="operation" value="message"' . disabled( $can_change, false, false ) . '>' . esc_html__( 'Save message', 'stillgate' ) . '</button>';
 
 		echo '</form>';
+		$this->close_card();
 	}
 
-	private function render_protected_summary(): void {
+	/**
+	 * How a deploy tool drives Stillgate. Plain snippets, nothing sent
+	 * anywhere.
+	 */
+	private function render_pipelines_card(): void {
+		$this->open_card( 'sg-pipelines-title', __( 'Deployment pipelines', 'stillgate' ) );
+		echo '<p>' . esc_html__( 'Start and end a freeze from your deploy script, so it can never be forgotten.', 'stillgate' ) . '</p>';
+
+		echo '<p class="sg-label">' . esc_html__( 'WP-CLI', 'stillgate' ) . '</p>';
+		echo '<pre class="sg-code">wp stillgate enable --for=30m
+wp stillgate receipt --check
+wp stillgate disable</pre>';
+
+		echo '<p class="sg-label">' . esc_html__( 'REST API (use an Application Password)', 'stillgate' ) . '</p>';
+		echo '<pre class="sg-code">curl -u "user:application-password" \
+  -X POST ' . esc_html( rest_url( 'stillgate/v1/freeze' ) ) . ' \
+  -d "for=30m"</pre>';
+		$this->close_card();
+	}
+
+	private function render_access_card( FreezeConfig $config, \DateTimeZone $timezone ): void {
 		$roles_with_bypass = array();
 
-		foreach ( wp_roles()->roles as $role_name => $role_data ) {
+		foreach ( wp_roles()->roles as $role_data ) {
 			if ( ! empty( $role_data['capabilities'][ Installer::CAPABILITY ] ) ) {
 				$roles_with_bypass[] = translate_user_role( $role_data['name'] );
 			}
 		}
 
-		echo '<h2>' . esc_html__( 'Roles that can bypass the freeze', 'stillgate' ) . '</h2>';
+		$this->open_card( 'sg-access-title', __( 'Access', 'stillgate' ) );
 
-		if ( $roles_with_bypass ) {
-			echo '<p>' . esc_html( implode( ', ', $roles_with_bypass ) ) . '</p>';
-		} else {
-			echo '<div class="notice notice-warning inline"><p>' . esc_html__( 'No role currently has the "deployment_guard_bypass" capability. Only WP-CLI and the DEPLOYMENT_GUARD_FORCE constant can change the freeze.', 'stillgate' ) . '</p></div>';
+		echo '<table class="sg-details" role="presentation"><tbody>';
+
+		$this->detail_row(
+			__( 'Your account', 'stillgate' ),
+			current_user_can( Installer::CAPABILITY )
+				? esc_html__( 'Can bypass the freeze and change these settings.', 'stillgate' )
+				: esc_html__( 'Restricted while the freeze is active; cannot change these settings.', 'stillgate' )
+		);
+
+		$this->detail_row(
+			__( 'Roles that can bypass', 'stillgate' ),
+			$roles_with_bypass
+				? esc_html( implode( ', ', $roles_with_bypass ) )
+				: esc_html__( 'None. Only WP-CLI and the DEPLOYMENT_GUARD_FORCE constant can change the freeze.', 'stillgate' )
+		);
+
+		$this->detail_row(
+			__( 'Site timezone', 'stillgate' ),
+			esc_html( wp_timezone_string() ) . ' &mdash; <a href="' . esc_url( admin_url( 'options-general.php' ) ) . '">' . esc_html__( 'change', 'stillgate' ) . '</a>'
+		);
+
+		if ( $config->updated_at > 0 ) {
+			$this->detail_row( __( 'Last changed', 'stillgate' ), esc_html( $this->format_datetime( $config->updated_at, $timezone ) ) . ' ' . $this->user_label( $config->updated_by ) );
 		}
+
+		echo '</tbody></table>';
+		$this->close_card();
+	}
+
+	private function detail_row( string $label, string $value_html ): void {
+		echo '<tr><th scope="row">' . esc_html( $label ) . '</th><td>' . $value_html . '</td></tr>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- $value_html is pre-escaped by each caller.
+	}
+
+	private function render_protected_summary(): void {
+		echo '<details class="sg-details-block"><summary>' . esc_html__( 'What a freeze does', 'stillgate' ) . '</summary>';
+		echo '<p>' . esc_html__( 'While active, users without the "deployment_guard_bypass" capability cannot create, edit, delete, or restore content of a protected type; cannot manage protected taxonomies, menus, widgets, or Customizer settings; and cannot use the Site Editor. Scheduled posts of a protected type do not publish while the freeze is active — they remain scheduled and publish normally once it ends.', 'stillgate' ) . '</p>';
+		echo '<p>' . esc_html__( 'Content changes made through the REST API, XML-RPC, WP-CLI, and WP-Cron events are blocked the same way. WP-Cron itself keeps running, and scheduled posts are held rather than lost. Changes that go around WordPress\'s own content functions and capability checks, such as direct database queries, cannot be blocked.', 'stillgate' ) . '</p>';
+		echo '<p>' . esc_html__( 'The public, logged-out frontend is never affected unless you pause comments or forms above. Users, plugins, themes, and general site settings are never affected. Users with the bypass capability, and Super Admins on Multisite, can always continue — but their changes can still be overwritten if a deployment or migration proceeds.', 'stillgate' ) . '</p>';
+		echo '<p><strong>' . esc_html__( 'Protected content:', 'stillgate' ) . '</strong> ' . $this->protected_types_summary( $this->guard->protected_types() ) . '</p>'; // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- protected_types_summary() escapes its output.
+		echo '</details>';
+	}
+
+	private function protected_types_summary( array $protected_types ): string {
+		$post_type_labels = array();
+
+		foreach ( $protected_types['post_types'] as $post_type ) {
+			$object             = get_post_type_object( $post_type );
+			$post_type_labels[] = $object ? $object->labels->name : $post_type;
+		}
+
+		$taxonomy_labels = array();
+
+		foreach ( $protected_types['taxonomies'] as $taxonomy ) {
+			$object            = get_taxonomy( $taxonomy );
+			$taxonomy_labels[] = $object ? $object->labels->name : $taxonomy;
+		}
+
+		$parts = array();
+
+		if ( $post_type_labels ) {
+			$parts[] = esc_html( implode( ', ', $post_type_labels ) );
+		}
+
+		if ( $taxonomy_labels ) {
+			$parts[] = esc_html( implode( ', ', $taxonomy_labels ) );
+		}
+
+		$parts[] = esc_html__( 'menus, widgets, the Customizer, and the Site Editor', 'stillgate' );
+
+		return implode( '; ', $parts );
 	}
 
 	private function render_activity_table(): void {
 		$entries = $this->service->entries();
 
-		echo '<h2>' . esc_html__( 'Activity', 'stillgate' ) . '</h2>';
+		echo '<h2 class="sg-activity-title">' . esc_html__( 'Activity', 'stillgate' ) . '</h2>';
 
 		if ( ! $entries ) {
 			echo '<p>' . esc_html__( 'No activity recorded yet.', 'stillgate' ) . '</p>';
@@ -505,11 +906,13 @@ final class SettingsPage {
 			case 'disabled':
 				return __( 'Freeze disabled', 'stillgate' );
 			case 'schedule_set':
-				return __( 'Schedule changed', 'stillgate' );
+				return __( 'Schedule or timer set', 'stillgate' );
 			case 'schedule_cleared':
 				return __( 'Schedule cleared', 'stillgate' );
 			case 'message_updated':
 				return __( 'Message changed', 'stillgate' );
+			case 'scope_changed':
+				return __( 'Coverage changed', 'stillgate' );
 			case 'blocked':
 				return __( 'Blocked write attempt', 'stillgate' );
 			default:

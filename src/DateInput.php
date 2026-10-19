@@ -141,6 +141,62 @@ final class DateInput {
 	}
 
 	/**
+	 * Parse a short duration such as "30m", "2h", "1d", "1h30m" or "90s"
+	 * into seconds. A bare integer means minutes. Units are s, m, h and d
+	 * (also "min", "hour", "day" and their plurals), written without
+	 * relative phrases, signs or decimals, so scripts get one unambiguous
+	 * spelling.
+	 *
+	 * @param string $value Raw input.
+	 * @return int Seconds, always greater than zero.
+	 *
+	 * @throws \DomainException With message `invalid_duration`.
+	 */
+	public static function parse_duration( string $value ): int {
+		// Far beyond the longest window anyone may start (the service
+		// reports that as window_too_long), and far below anything that
+		// could overflow an integer when added to a timestamp.
+		$ceiling = 10 * 365 * 86400;
+
+		$value = strtolower( trim( $value ) );
+
+		if ( 1 === preg_match( '/^\d+$/', $value ) ) {
+			$value .= 'm';
+		}
+
+		if ( '' === $value || 1 !== preg_match( '/^(?:\d+\s*(?:seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\s*)+$/', $value ) ) {
+			throw new \DomainException( 'invalid_duration' );
+		}
+
+		preg_match_all( '/(\d+)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)/', $value, $parts, PREG_SET_ORDER );
+
+		$seconds = 0;
+
+		foreach ( $parts as $part ) {
+			$unit       = $part[2][0];
+			$multiplier = 'd' === $unit ? 86400 : ( 'h' === $unit ? 3600 : ( 'm' === $unit ? 60 : 1 ) );
+
+			// Compared before multiplying, as digits: a number too large for
+			// an integer must be refused, not wrapped into a float.
+			if ( strlen( ltrim( $part[1], '0' ) ) > 10 || (int) $part[1] > intdiv( $ceiling, $multiplier ) ) {
+				throw new \DomainException( 'invalid_duration' );
+			}
+
+			$seconds += (int) $part[1] * $multiplier;
+
+			if ( $seconds > $ceiling ) {
+				throw new \DomainException( 'invalid_duration' );
+			}
+		}
+
+		if ( $seconds <= 0 ) {
+			throw new \DomainException( 'invalid_duration' );
+		}
+
+		return $seconds;
+	}
+
+	/**
 	 * Format a UTC timestamp as a value suitable for an HTML
 	 * `datetime-local` input, in the given timezone.
 	 */
