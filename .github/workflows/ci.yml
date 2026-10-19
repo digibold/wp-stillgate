@@ -86,6 +86,26 @@ jobs:
           coverage: none
       - run: php bin/check-version.php
 
+  action:
+    name: GitHub Action unit tests (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        # 24 is the runtime action.yml declares. 20 is the oldest line the
+        # code is written for (AbortSignal.any needs 20.3, --test-timeout
+        # needs 20.11).
+        node: ['20', '24']
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+      - run: node --version
+      # The shell expands the glob (a directory argument fails on Node 22),
+      # and --test-timeout makes a test that waits forever fail after two
+      # minutes instead of running until the job limit.
+      - run: node --test --test-timeout=120000 tests/action/*.test.js
+
   unit:
     name: Unit (PHP ${{ matrix.php }})
     runs-on: ubuntu-latest
@@ -216,6 +236,8 @@ jobs:
           test ! -e /tmp/dist/stillgate/vendor
           test ! -e /tmp/dist/stillgate/tests
           test ! -e /tmp/dist/stillgate/.github
+          test ! -e /tmp/dist/stillgate/action
+          test ! -e /tmp/dist/stillgate/action.yml
           test -e /tmp/dist/stillgate/stillgate.php
           test -e /tmp/dist/stillgate/src/autoload.php
       - name: Syntax-check the extracted archive

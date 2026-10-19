@@ -141,6 +141,11 @@ cancelled or the runner dies before the last step, editing unlocks by itself.
 `curl -f` makes a failed call fail the step. Ending a freeze that is already
 over is not an error: it answers `200` with `"result": "unchanged"`.
 
+## Recipes
+
+Complete pipeline recipes, including a one-step GitHub Action, are in
+[recipes](recipes/README.md).
+
 ## Status in a monitoring check
 
 `GET /status` returns `active`, `ends_at` and `seconds_left`, which is enough

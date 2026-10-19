@@ -243,6 +243,22 @@ curl -fsS -u "$WP_USER:$WP_APP_PASSWORD" -X POST "$SITE/wp-json/stillgate/v1/fre
 See [docs/rest-api.md](docs/rest-api.md) for every route, permissions and a
 GitHub Actions example.
 
+### Integrations
+
+Ready-made recipes for freezing a site around a deploy, checking the receipt and
+releasing the freeze even when the deploy fails, each run against real tooling:
+
+- **GitHub Actions**: a one-step Action, `digibold/wp-stillgate@action-v1`
+  ([docs/recipes/github-actions.md](docs/recipes/github-actions.md))
+- **Deployer**: a recipe with a tested database-import sequence
+  ([docs/recipes/deployer.md](docs/recipes/deployer.md))
+- **Trellis** and **Bedrock**: deploy hooks, Composer install and configuration
+  ([docs/recipes/trellis.md](docs/recipes/trellis.md),
+  [docs/recipes/bedrock.md](docs/recipes/bedrock.md))
+
+An overview, and how to choose between WP-CLI and the REST API, is in
+[docs/recipes](docs/recipes/README.md).
+
 ## REST API and XML-RPC behavior
 
 A blocked REST write returns **HTTP 423 Locked** with a machine-readable

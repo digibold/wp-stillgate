@@ -165,6 +165,11 @@ wp stillgate enable --for=1h
 `schedule` also accepts `--end` as an absolute time (relative offsets like
 `+1 hour` are rejected, see above), which suits a window planned in advance.
 
+## Pipelines
+
+Recipes for GitHub Actions, Deployer, Trellis and Bedrock are in
+[recipes](recipes/README.md).
+
 ## Multisite
 
 Each site's freeze is independent. Target a specific site with `--url`:

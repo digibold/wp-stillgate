@@ -1,0 +1,62 @@
+name: 'Stillgate freeze'
+description: 'Freeze editing on a WordPress site while a job deploys, check afterwards whether any content changed, and release the freeze even when the job fails.'
+author: 'Linards Lazdins'
+branding:
+  icon: 'lock'
+  color: 'blue'
+
+inputs:
+  site-url:
+    description: 'Address of the WordPress site, for example https://example.com. Must be https, except for localhost and 127.0.0.1.'
+    required: true
+  username:
+    description: 'WordPress user that owns the Application Password. It needs the manage_options and deployment_guard_bypass capabilities (administrators have both).'
+    required: true
+  app-password:
+    description: 'Application Password of that user. Store it as a secret.'
+    required: true
+  duration:
+    description: 'How long the freeze lasts if the job never releases it, for example 30m, 2h or 1h30m (1 minute to 7 days). Make it longer than the job.'
+    required: false
+    default: '30m'
+  message:
+    description: 'Message shown to people whose editing is frozen. It is always sent, so an empty value clears the message left by an earlier freeze and the site shows its default text.'
+    required: false
+    default: ''
+  if-already-frozen:
+    description: >-
+      What to do when the site already has a freeze that is active or a scheduled window that has not begun yet.
+      fail (default): stop, and name the window when there is one.
+      keep: leave a freeze that is active alone and do nothing, and do not end it afterwards; it still stops for a window that has not begun, because
+      nothing is frozen yet and the job would continue unfrozen.
+      replace: take it over; the freeze this job starts takes its place, and ending it at the end of the job ends it for good. A scheduled window that is
+      replaced is gone afterwards. The receipt of a replaced active freeze is kept, so changes made during that earlier freeze also fail fail-on-changes.
+    required: false
+    default: 'fail'
+  fail-on-changes:
+    description: 'true: fail the job, after the freeze has been released, when the receipt is not clean or cannot confirm that nothing changed: it changed, the receipt could not be read, the freeze had ended before the job did, or the freeze on the site is no longer the one this job started (that one is never ended). false: only report it in the log and the job summary.'
+    required: false
+    default: 'true'
+  release:
+    description: 'true: end the freeze when the job finishes, also when it failed. false: leave it on until its time runs out.'
+    required: false
+    default: 'true'
+
+# The verdict of the receipt is not an output. The post step, which reads the
+# receipt, runs after the last step of the job and the runner drops the
+# outputs a post step writes (a post step has no context name to store them
+# under; see SetOutput in Runner.Worker/ExecutionContext.cs of actions/runner,
+# read, not run). The verdict is in the job summary and in the result of the
+# job: with fail-on-changes true the post step fails the job unless the
+# receipt confirms that nothing changed.
+outputs:
+  frozen:
+    description: 'true when this action started a freeze, false otherwise.'
+  ends-at:
+    description: 'When the freeze ends if nothing ends it earlier (ISO 8601). With if-already-frozen set to keep, the end of the freeze that was already active.'
+
+runs:
+  using: 'node24'
+  main: 'action/main.js'
+  post: 'action/post.js'
+  post-if: 'always()'
