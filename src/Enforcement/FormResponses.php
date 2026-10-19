@@ -34,7 +34,7 @@ final class FormResponses {
 	 *
 	 * @param string $action  The admin-ajax.php action.
 	 * @param string $message The visitor message, plain text.
-	 * @return array{status: int, body: array<string, mixed>}
+	 * @return array{status: int, body: array<string, mixed>, content_type?: string}
 	 */
 	public function ajax( string $action, string $message ): array {
 		$plain = array(
@@ -63,13 +63,18 @@ final class FormResponses {
 			case 'nf_ajax_submit':
 				// Ninja Forms' script reads `errors.form` on every answer and
 				// throws without it, which would leave the button disabled.
+				// It also treats every key but two as a blocking error and
+				// then refuses to resubmit until the page is reloaded, even
+				// after the freeze has ended. `email_not_sent` is one of the
+				// two it treats as informational, so the message is shown and
+				// the form stays usable (checked in a browser).
 				return array(
 					'status' => 423,
 					'body'   => array(
 						'success' => false,
 						'data'    => $plain,
 						'errors'  => array(
-							'form' => array( self::CODE => $message ),
+							'form' => array( 'email_not_sent' => $message ),
 						),
 						'debug'   => array(),
 					),
@@ -86,6 +91,25 @@ final class FormResponses {
 						'errors'  => array(
 							self::CODE => array( $message ),
 						),
+					),
+				);
+
+			case 'frm_entries_create':
+				// Formidable calls .replace() on the answer, so it must be
+				// text/html (a parsed JSON object breaks it and leaves the
+				// form stuck), and any non-2xx answer makes its script submit
+				// the form again as an ordinary POST, which lands on a bare
+				// error page and is counted twice. A 2xx answer with an
+				// error under a non-numeric key shows the message above the
+				// form (checked in a browser).
+				return array(
+					'status'       => 200,
+					'content_type' => 'text/html; charset=UTF-8',
+					'body'         => array(
+						'errors'        => array( self::CODE => esc_html( $message ) ),
+						'content'       => '',
+						'pass'          => false,
+						'error_message' => '<div class="frm_error_style" role="alert" tabindex="-1" data-frm-error-summary="1"></div>',
 					),
 				);
 
@@ -134,7 +158,7 @@ final class FormResponses {
 	 * @param string           $message The visitor message, plain text.
 	 */
 	public function rest( string $route, \WP_REST_Request $request, string $message ): ?\WP_REST_Response {
-		if ( 1 !== preg_match( '#^/contact-form-7/v1/contact-forms/([^/]+)/feedback#', $route, $matches ) ) {
+		if ( 1 !== preg_match( '#^/contact-form-7/v1/contact-forms/([^/]+)/feedback#i', $route, $matches ) ) {
 			return null;
 		}
 

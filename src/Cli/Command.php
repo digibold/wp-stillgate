@@ -107,6 +107,11 @@ final class Command {
 	public function enable( $args, $assoc_args ): void {
 		$this->suspension->run(
 			function () use ( $assoc_args ): void {
+				// The message first, so one that is too long refuses the
+				// command before anything is locked; a script under set -e
+				// must never be left believing the freeze did not start.
+				$this->maybe_set_message( $assoc_args );
+
 				if ( isset( $assoc_args['for'] ) ) {
 					$this->do_timed_freeze( (string) $assoc_args['for'] );
 				} else {
@@ -115,7 +120,6 @@ final class Command {
 					\WP_CLI::success( 'unchanged' === $result ? 'The freeze was already on.' : 'Stillgate is now active.' );
 				}
 
-				$this->maybe_set_message( $assoc_args );
 				$this->maybe_warn_forced();
 				$this->maybe_warn_object_cache();
 			}
@@ -259,8 +263,11 @@ final class Command {
 	 * ---
 	 *
 	 * [--check]
-	 * : Exit with status 1 when the content changed during the freeze, so a
+	 * : Exit with status 1 unless the latest freeze left a clean receipt, so a
 	 * deploy script can stop before it relies on a dump that is out of date.
+	 * The receipt covers only the time between its start and its end: run the
+	 * check while the freeze is still on, or after a freeze that lasted as long
+	 * as the work, because edits made after a freeze ended are not in it.
 	 *
 	 * ## EXAMPLES
 	 *
@@ -297,7 +304,13 @@ final class Command {
 					\WP_CLI::print_value( $report, array( 'format' => $format ) );
 				}
 
-				if ( ! empty( $assoc_args['check'] ) && false === $report['clean'] ) {
+				if ( ! empty( $report['unverified'] ) ) {
+					\WP_CLI::warning( 'A scheduled freeze ran without anyone observing its start, so what changed during it was not recorded.' );
+				}
+
+				// Only a clean receipt passes: a window nobody observed is
+				// not known to be clean.
+				if ( ! empty( $assoc_args['check'] ) && true !== $report['clean'] ) {
 					$this->suspension->outside(
 						static function (): void {
 							\WP_CLI::halt( 1 );
@@ -361,7 +374,7 @@ final class Command {
 
 				$config = $this->service->config();
 
-				if ( null !== $config->schedule_start ) {
+				if ( null !== $config->schedule_start && 'upcoming' === $config->schedule_status( time() ) ) {
 					\WP_CLI::warning(
 						sprintf(
 							'An upcoming scheduled freeze remains configured (starts %s). Run "wp stillgate schedule --clear" to remove it.',
@@ -412,27 +425,28 @@ final class Command {
 				$has_start = isset( $assoc_args['start'] );
 				$has_end   = isset( $assoc_args['end'] );
 
-				if ( $clear ) {
-					if ( $has_start || $has_end ) {
-						$this->fail( 'Use either --clear or --start/--end, not both.' );
+				if ( $clear && ( $has_start || $has_end ) ) {
+					$this->fail( 'Use either --clear or --start/--end, not both.' );
 
-						return;
-					}
-
-					$this->do_clear_schedule();
-				} else {
-					if ( ! $has_start || ! $has_end ) {
-						$this->fail( 'Both --start and --end are required (or use --clear).' );
-
-						return;
-					}
-
-					if ( ! $this->do_set_schedule( (string) $assoc_args['start'], (string) $assoc_args['end'] ) ) {
-						return;
-					}
+					return;
 				}
 
+				if ( ! $clear && ( ! $has_start || ! $has_end ) ) {
+					$this->fail( 'Both --start and --end are required (or use --clear).' );
+
+					return;
+				}
+
+				// The message before the window is saved, so one that is too
+				// long refuses the command before anything is scheduled.
 				$this->maybe_set_message( $assoc_args );
+
+				if ( $clear ) {
+					$this->do_clear_schedule();
+				} elseif ( ! $this->do_set_schedule( (string) $assoc_args['start'], (string) $assoc_args['end'] ) ) {
+					return;
+				}
+
 				$this->maybe_warn_forced();
 				$this->maybe_warn_object_cache();
 			}
@@ -554,7 +568,7 @@ final class Command {
 			'opened_at'        => (string) $report['opened_at'],
 			'closed_at'        => (string) ( $report['closed_at'] ?? '' ),
 			'source'           => (string) $report['source'],
-			'clean'            => $report['clean'] ? 'true' : 'false',
+			'clean'            => true === $report['clean'] ? 'true' : ( null === $report['clean'] ? 'unknown' : 'false' ),
 			'changed_posts'    => (string) ( $content['changed_posts'] ?? 0 ),
 			'changed_ids'      => implode( ',', $content['changed_ids'] ?? array() ),
 			'deleted_estimate' => (string) ( $content['deleted_estimate'] ?? 0 ),

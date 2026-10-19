@@ -9,6 +9,7 @@ namespace Digibold\DeploymentGuard\Admin;
 
 use Digibold\DeploymentGuard\FreezeService;
 use Digibold\DeploymentGuard\Installer;
+use Digibold\DeploymentGuard\Receipt;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -27,8 +28,11 @@ final class SiteHealth {
 
 	private FreezeService $service;
 
-	public function __construct( FreezeService $service ) {
+	private ?Receipt $receipt;
+
+	public function __construct( FreezeService $service, ?Receipt $receipt = null ) {
 		$this->service = $service;
+		$this->receipt = $receipt;
 	}
 
 	public function register(): void {
@@ -84,7 +88,9 @@ final class SiteHealth {
 
 		if ( $this->service->is_active() ) {
 			$ends_at = $this->service->ends_at();
-			$since   = $config->updated_at;
+			// Since the freeze began, not since the configuration was last
+			// touched: fixing a typo in the message must not restart the clock.
+			$since = $this->receipt?->opened_at() ?? $config->updated_at;
 
 			if ( null === $ends_at && $since > 0 && ( $now - $since ) > self::FORGOTTEN_AFTER ) {
 				$result['status']      = 'recommended';

@@ -156,6 +156,8 @@ final class RestControllerTest extends TestCase {
 		return array(
 			'unparseable duration'     => array( array( 'for' => 'soon' ), 'invalid_duration' ),
 			'iso duration'             => array( array( 'for' => 'PT30M' ), 'invalid_duration' ),
+			'empty duration'           => array( array( 'for' => '' ), 'invalid_duration' ),
+			'duration that overflows'  => array( array( 'for' => '99999999999999999999d' ), 'invalid_duration' ),
 			'shorter than a minute'    => array( array( 'for' => '30s' ), 'duration_too_short' ),
 			'longer than a window'     => array( array( 'for' => '8d' ), 'window_too_long' ),
 			'message that is too long' => array( array( 'for' => '30m', 'message' => str_repeat( 'x', 501 ) ), 'message_too_long' ),

@@ -8,6 +8,7 @@ namespace Digibold\DeploymentGuard\Tests\Integration;
 use Digibold\DeploymentGuard\Admin\SiteHealth;
 use Digibold\DeploymentGuard\FreezeService;
 use Digibold\DeploymentGuard\Installer;
+use Digibold\DeploymentGuard\Receipt;
 
 final class SiteHealthTest extends TestCase {
 
@@ -97,5 +98,25 @@ final class SiteHealthTest extends TestCase {
 
 		$this->assertSame( 'recommended', $result['status'] );
 		$this->assertStringContainsString( 'Nobody can end a freeze', $result['label'] );
+	}
+
+	public function test_editing_the_message_does_not_restart_the_forgotten_freeze_clock(): void {
+		$now = time() - 10 * HOUR_IN_SECONDS;
+		$clock = static function () use ( &$now ): int {
+			return $now;
+		};
+		$service = new FreezeService( $clock, new \Digibold\DeploymentGuard\Suspension() );
+		$receipt = new Receipt( $service, $this->make_guard( $service ), $clock );
+		remove_all_actions( 'deployment_guard_state_changed' );
+		$receipt->register();
+
+		$service->enable();
+		$now = time();
+		$service->set_message( 'Fixing a typo in the message' );
+
+		$result = ( new SiteHealth( $service, $receipt ) )->run_test();
+
+		$this->assertSame( 'recommended', $result['status'] );
+		$this->assertStringContainsString( '10 hours', $result['description'], 'measured from when the freeze began, not from the edit' );
 	}
 }

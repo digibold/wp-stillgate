@@ -208,7 +208,7 @@ final class FormGateTest extends TestCase {
 		$payload = $this->refused_ajax();
 
 		$this->assertNotNull( $payload, $action );
-		$this->assertFalse( $payload['success'], $action );
+		$this->assertFalse( $payload['success'] ?? $payload['pass'], $action . ' says the submission did not go through' );
 		$this->assertStringContainsString( 'temporarily paused', wp_json_encode( $payload ), $action );
 	}
 
@@ -226,12 +226,24 @@ final class FormGateTest extends TestCase {
 
 	public function test_a_form_without_an_adapter_gets_the_plain_error_with_a_code(): void {
 		$this->pause_forms();
-		$this->as_post( array( 'action' => 'frm_entries_create' ) );
+		$this->as_post( array( 'action' => 'elementor_pro_forms_send_form' ) );
 
 		$payload = $this->refused_ajax();
 
 		$this->assertSame( 'stillgate_forms_paused', $payload['data']['code'] );
 		$this->assertStringContainsString( 'temporarily paused', $payload['data']['message'] );
+	}
+
+	public function test_formidable_is_answered_with_text_html_json_and_the_message(): void {
+		$this->pause_forms();
+		$this->as_post( array( 'action' => 'frm_entries_create' ) );
+
+		$payload = $this->refused_ajax();
+
+		$this->assertNotNull( $payload );
+		$this->assertFalse( $payload['pass'] );
+		$this->assertStringContainsString( 'temporarily paused', $payload['errors']['stillgate_forms_paused'] );
+		$this->assertSame( 1, $this->receipt->report()['paused']['forms'], 'one attempt counts once' );
 	}
 
 	public function test_the_ajax_gate_runs_on_init_as_well_as_admin_init(): void {
@@ -329,6 +341,85 @@ final class FormGateTest extends TestCase {
 		$this->gate->guard_ajax_request();
 
 		$this->addToAssertionCount( 1 );
+	}
+
+	/**
+	 * @dataProvider provide_differently_cased_routes
+	 */
+	public function test_a_differently_cased_rest_route_is_refused_like_the_lowercase_one( string $route ): void {
+		$this->pause_forms();
+
+		$result = $this->gate->guard_rest_request( null, null, $this->rest_request( 'POST', $route ) );
+
+		$this->assertNotNull( $result, $route );
+	}
+
+	public static function provide_differently_cased_routes(): array {
+		return array(
+			'mixed'          => array( '/Contact-Form-7/v1/contact-forms/12/feedback' ),
+			'upper'          => array( '/CONTACT-FORM-7/V1/CONTACT-FORMS/12/FEEDBACK' ),
+			'last segment'   => array( '/contact-form-7/v1/contact-forms/12/Feedback' ),
+			'Gravity upper'  => array( '/GF/v2/forms/3/Submissions' ),
+		);
+	}
+
+	public function test_a_form_post_sent_to_a_url_that_only_looks_like_rest_or_ajax_is_still_refused(): void {
+		$this->pause_forms();
+		$this->as_post( array( '_wpcf7' => '12', 'your-name' => 'A' ) );
+
+		// A REST-looking URL no REST check recognizes.
+		$_SERVER['REQUEST_URI'] = '/wp-json/anything/at/all';
+		$this->assertNotNull( $this->refused_page(), 'wp-json URL that matches no form route' );
+
+		$_SERVER['REQUEST_URI'] = '/index.php?rest_route=/x';
+		$_GET                   = array( 'rest_route' => '/x' );
+		$this->assertNotNull( $this->refused_page(), 'rest_route that matches no form route' );
+		$_GET = array();
+
+		// admin-ajax.php with an action no AJAX check recognizes.
+		set_current_screen( 'dashboard' );
+		add_filter( 'wp_doing_ajax', '__return_true' );
+		add_filter( 'wp_die_ajax_handler', array( $this, 'get_wp_die_handler' ), 1, 1 );
+		$this->as_post( array( '_wpcf7' => '12', 'action' => 'unlisted_action' ) );
+
+		try {
+			$this->assertNotNull( $this->refused_page(), 'admin-ajax.php with an unlisted action' );
+		} finally {
+			remove_filter( 'wp_doing_ajax', '__return_true' );
+			remove_filter( 'wp_die_ajax_handler', array( $this, 'get_wp_die_handler' ), 1 );
+			set_current_screen( 'front' );
+		}
+	}
+
+	public function test_a_recognized_rest_route_in_any_case_is_left_to_the_rest_check(): void {
+		$this->pause_forms();
+		$this->as_post( array( '_wpcf7' => '12' ) );
+		$_SERVER['REQUEST_URI'] = '/wp-json/Contact-Form-7/v1/contact-forms/12/feedback';
+
+		$this->assertNull( $this->refused_page() );
+	}
+
+	public function test_a_partial_filter_result_keeps_the_built_in_list_for_the_missing_kinds(): void {
+		$this->pause_forms();
+		add_filter( 'deployment_guard_form_requests', static fn () => array( 'ajax_actions' => array( 'my_form' ) ) );
+
+		$this->as_post( array( '_wpcf7' => '12' ) );
+		$this->assertNotNull( $this->refused_page(), 'post fields fall back to the defaults' );
+
+		$result = $this->gate->guard_rest_request( null, null, $this->rest_request( 'POST', '/gf/v2/forms/3/submissions' ) );
+		$this->assertWPError( $result, 'rest routes fall back to the defaults' );
+	}
+
+	public function test_a_site_can_still_recognize_nothing_of_a_kind_by_returning_an_empty_list(): void {
+		$this->pause_forms();
+		add_filter(
+			'deployment_guard_form_requests',
+			static fn ( $requests ) => array_merge( $requests, array( 'post_fields' => array() ) )
+		);
+
+		$this->as_post( array( '_wpcf7' => '12' ) );
+
+		$this->assertNull( $this->refused_page() );
 	}
 
 	public function test_a_form_rest_route_is_refused_with_423(): void {

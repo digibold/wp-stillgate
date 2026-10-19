@@ -392,6 +392,92 @@ final class CliCommandTest extends TestCase {
 		$this->assertSame( 'false', $printed[0][0]['scope_forms'] );
 	}
 
+	public function test_an_overlong_message_refuses_enable_before_anything_is_locked(): void {
+		list( $command, $service ) = $this->install();
+
+		foreach ( array( array(), array( 'for' => '30m' ) ) as $extra ) {
+			try {
+				$command->enable( array(), array_merge( $extra, array( 'message' => str_repeat( 'x', 501 ) ) ) );
+				$this->fail( 'Expected a CLI error.' );
+			} catch ( CliExit $exit ) {
+				$this->assertSame( 1, $exit->getCode() );
+			}
+
+			$this->assertFalse( $service->is_active(), 'a script under set -e must not be left with a running freeze' );
+		}
+	}
+
+	public function test_an_overlong_message_refuses_schedule_before_the_window_is_saved(): void {
+		list( $command, $service ) = $this->install();
+
+		try {
+			$command->schedule(
+				array(),
+				array(
+					'start'   => gmdate( 'Y-m-d H:i', time() + 3600 ),
+					'end'     => gmdate( 'Y-m-d H:i', time() + 7200 ),
+					'message' => str_repeat( 'x', 501 ),
+				)
+			);
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode() );
+		}
+
+		$this->assertNull( $service->config()->schedule_start );
+	}
+
+	public function test_disable_does_not_warn_about_a_window_that_already_ended(): void {
+		list( $command ) = $this->install();
+
+		update_option(
+			\Digibold\DeploymentGuard\FreezeService::OPTION_STATE,
+			array(
+				'schema'         => 1,
+				'enabled'        => false,
+				'schedule_start' => time() - 7200,
+				'schedule_end'   => time() - 3600,
+				'message'        => '',
+				'updated_at'     => time() - 7200,
+				'updated_by'     => 1,
+			)
+		);
+
+		$command->disable( array(), array() );
+
+		$this->assertSame( array(), \WP_CLI::messages_of( 'warning' ) );
+	}
+
+	public function test_receipt_check_fails_for_a_window_nobody_observed(): void {
+		list( $command, $service ) = $this->install();
+
+		// A window that began and ended without any request that could sync.
+		update_option(
+			\Digibold\DeploymentGuard\FreezeService::OPTION_STATE,
+			array(
+				'schema'         => 1,
+				'enabled'        => false,
+				'schedule_start' => time() - 7200,
+				'schedule_end'   => time() - 3600,
+				'message'        => '',
+				'updated_at'     => time() - 7200,
+				'updated_by'     => 1,
+			)
+		);
+
+		try {
+			$command->receipt( array(), array( 'format' => 'json', 'check' => true ) );
+			$this->fail( 'Expected exit status 1.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode(), 'a window nobody observed is not known to be clean' );
+		}
+
+		$printed = \WP_CLI::messages_of( 'print_value' );
+		$this->assertTrue( $printed[0][0]['unverified'] );
+		$this->assertNull( $printed[0][0]['clean'] );
+		$this->assertNotEmpty( \WP_CLI::messages_of( 'warning' ) );
+	}
+
 	public function test_receipt_without_any_freeze_is_an_error(): void {
 		list( $command ) = $this->install();
 

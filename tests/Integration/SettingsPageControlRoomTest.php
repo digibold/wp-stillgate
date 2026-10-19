@@ -277,6 +277,46 @@ final class SettingsPageControlRoomTest extends TestCase {
 		$this->assertStringContainsString( 'Paused visitors: 1 comments, 2 form submissions.', $this->html() );
 	}
 
+	public function test_a_receipt_with_no_changed_posts_but_a_comment_does_not_say_zero_post_changed(): void {
+		$post = self::factory()->post->create( array( 'post_date' => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ), 'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', time() - HOUR_IN_SECONDS ) ) );
+		$this->service->enable();
+		self::factory()->comment->create( array( 'comment_post_ID' => $post, 'comment_approved' => '1' ) );
+
+		$html = $this->html();
+
+		$this->assertStringNotContainsString( '0 post changed', $html );
+		$this->assertStringNotContainsString( '0 posts changed', $html );
+		$this->assertStringContainsString( 'Content changed during the freeze.', $html );
+		$this->assertStringContainsString( 'sg-receipt--dirty', $html );
+	}
+
+	public function test_a_running_receipt_says_since_when(): void {
+		$this->service->enable();
+
+		$this->assertStringContainsString( 'Since ', $this->html() );
+		$this->assertStringNotContainsString( 'still running', $this->html() );
+	}
+
+	public function test_term_changes_read_as_a_count_like_the_other_facts(): void {
+		$this->service->enable();
+
+		$this->assertMatchesRegularExpression( '/<strong>0<\/strong> term changes/', $this->html() );
+	}
+
+	public function test_the_coverage_card_is_called_coverage(): void {
+		$html = $this->html();
+
+		$this->assertStringContainsString( 'sg-scope-title">Coverage<', $html );
+		$this->assertStringNotContainsString( 'What a freeze covers', $html );
+	}
+
+	public function test_a_duration_that_would_overflow_is_refused_without_an_error(): void {
+		$location = $this->submit( array( 'operation' => 'freeze_for', 'duration' => '99999999999999999999', 'confirm' => '1' ) );
+
+		$this->assertStringContainsString( 'dg_error=invalid_duration', $location );
+		$this->assertFalse( $this->service->is_active() );
+	}
+
 	public function test_the_pipelines_card_shows_real_commands_and_endpoint(): void {
 		$html = $this->html();
 

@@ -153,6 +153,11 @@ final class DateInput {
 	 * @throws \DomainException With message `invalid_duration`.
 	 */
 	public static function parse_duration( string $value ): int {
+		// Far beyond the longest window anyone may start (the service
+		// reports that as window_too_long), and far below anything that
+		// could overflow an integer when added to a timestamp.
+		$ceiling = 10 * 365 * 86400;
+
 		$value = strtolower( trim( $value ) );
 
 		if ( 1 === preg_match( '/^\d+$/', $value ) ) {
@@ -168,17 +173,19 @@ final class DateInput {
 		$seconds = 0;
 
 		foreach ( $parts as $part ) {
-			$number = (int) $part[1];
-			$unit   = $part[2][0];
+			$unit       = $part[2][0];
+			$multiplier = 'd' === $unit ? 86400 : ( 'h' === $unit ? 3600 : ( 'm' === $unit ? 60 : 1 ) );
 
-			if ( 'd' === $unit ) {
-				$seconds += $number * 86400;
-			} elseif ( 'h' === $unit ) {
-				$seconds += $number * 3600;
-			} elseif ( 'm' === $unit ) {
-				$seconds += $number * 60;
-			} else {
-				$seconds += $number;
+			// Compared before multiplying, as digits: a number too large for
+			// an integer must be refused, not wrapped into a float.
+			if ( strlen( ltrim( $part[1], '0' ) ) > 10 || (int) $part[1] > intdiv( $ceiling, $multiplier ) ) {
+				throw new \DomainException( 'invalid_duration' );
+			}
+
+			$seconds += (int) $part[1] * $multiplier;
+
+			if ( $seconds > $ceiling ) {
+				throw new \DomainException( 'invalid_duration' );
 			}
 		}
 

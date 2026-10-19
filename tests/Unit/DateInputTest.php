@@ -212,6 +212,11 @@ final class DateInputTest extends TestCase {
 			'trailing garbage'    => array( '30m later' ),
 			'unknown unit'        => array( '3w' ),
 			'iso 8601 duration'   => array( 'PT30M' ),
+			'overflowing days'    => array( '9999999999999999d' ),
+			'overflowing minutes' => array( '99999999999999999999' ),
+			'saturating seconds'  => array( '9223372036854775807s' ),
+			'beyond ten years'    => array( '4000d' ),
+			'sum beyond ten years' => array( '3000d3000d' ),
 		);
 	}
 }

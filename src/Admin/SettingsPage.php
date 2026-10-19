@@ -210,7 +210,9 @@ final class SettingsPage {
 		$duration = isset( $_POST['duration'] ) ? sanitize_key( wp_unslash( $_POST['duration'] ) ) : '';
 		$minutes  = 'manual' === $duration ? 0 : absint( $duration );
 
-		if ( 'manual' !== $duration && $minutes < 1 ) {
+		// Nothing near a year is a plausible freeze, and the cap keeps the
+		// multiplication below well inside an integer.
+		if ( 'manual' !== $duration && ( $minutes < 1 || $minutes > 525600 ) ) {
 			return new \WP_Error( 'invalid_duration', FreezeService::error_text( 'invalid_duration' ) );
 		}
 
@@ -353,7 +355,7 @@ final class SettingsPage {
 			case 'message_saved':
 				return __( 'The message has been saved.', 'stillgate' );
 			case 'scope_saved':
-				return __( 'What a freeze covers has been saved.', 'stillgate' );
+				return __( 'Coverage has been saved.', 'stillgate' );
 			case 'unchanged':
 				return __( 'Nothing changed.', 'stillgate' );
 			default:
@@ -554,6 +556,21 @@ final class SettingsPage {
 			return;
 		}
 
+		if ( ! empty( $report['unverified'] ) ) {
+			echo '<p class="sg-receipt sg-receipt--dirty"><span class="sg-receipt__mark" aria-hidden="true">?</span> ' . esc_html__( 'Nobody was there to see this freeze.', 'stillgate' ) . '</p>';
+			echo '<p class="description">' . esc_html(
+				sprintf(
+					/* translators: 1: freeze start, 2: freeze end. */
+					__( 'A scheduled freeze ran from %1$s to %2$s without any request that could record it, so what changed during it is not known.', 'stillgate' ),
+					$this->format_datetime( (int) strtotime( (string) $report['opened_at'] ), $timezone ),
+					$this->format_datetime( (int) strtotime( (string) $report['closed_at'] ), $timezone )
+				)
+			) . '</p>';
+			$this->close_card();
+
+			return;
+		}
+
 		$clean   = ! empty( $report['clean'] );
 		$content = $report['content'];
 		$open    = 'open' === $report['state'];
@@ -562,14 +579,16 @@ final class SettingsPage {
 
 		if ( $clean ) {
 			echo esc_html( $open ? __( 'Nothing has changed so far.', 'stillgate' ) : __( 'Nothing changed while the freeze was on.', 'stillgate' ) );
-		} else {
+		} elseif ( (int) $content['changed_posts'] > 0 ) {
 			echo esc_html(
 				sprintf(
 					/* translators: %d: number of posts that changed. */
-					_n( '%d post changed during the freeze.', '%d posts changed during the freeze.', max( 1, (int) $content['changed_posts'] ), 'stillgate' ),
+					_n( '%d post changed during the freeze.', '%d posts changed during the freeze.', (int) $content['changed_posts'], 'stillgate' ),
 					(int) $content['changed_posts']
 				)
 			);
+		} else {
+			echo esc_html__( 'Content changed during the freeze.', 'stillgate' );
 		}
 
 		echo '</p>';
@@ -636,7 +655,7 @@ final class SettingsPage {
 	private function render_scope_card( bool $can_change ): void {
 		$scope = $this->service->scope();
 
-		$this->open_card( 'sg-scope-title', __( 'What a freeze covers', 'stillgate' ) );
+		$this->open_card( 'sg-scope-title', __( 'Coverage', 'stillgate' ) );
 		echo '<p>' . esc_html__( 'A freeze always locks editing of content, media, menus and widgets. It can also pause what visitors send in, because anything saved to the database during a deployment or migration can be lost when the database is replaced.', 'stillgate' ) . '</p>';
 
 		echo '<form method="post" action="' . esc_url( admin_url( 'admin-post.php' ) ) . '">';

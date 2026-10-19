@@ -66,7 +66,7 @@ final class Plugin {
 			( new Admin\SettingsPage( $this->service, $guard, $receipt, plugins_url( 'assets/', $this->file ) ) )->register();
 			( new Admin\Notices( $guard ) )->register();
 			( new Admin\QuickActions( $this->service ) )->register();
-			( new Admin\SiteHealth( $this->service ) )->register();
+			( new Admin\SiteHealth( $this->service, $receipt ) )->register();
 		}
 
 		if ( ! $is_cli ) {

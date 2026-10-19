@@ -61,7 +61,11 @@ final class AdminBar {
 			'#wpadminbar .sg-ab-dot{flex:none;width:9px;height:9px;border-radius:50%;background:#f59e0b;box-shadow:0 0 0 3px rgba(245,158,11,.35)}' .
 			'#wpadminbar .sg-ab--upcoming .sg-ab-dot{background:#38bdf8;box-shadow:0 0 0 3px rgba(56,189,248,.35)}' .
 			'@media (prefers-reduced-motion:no-preference){#wpadminbar .sg-ab--active .sg-ab-dot{animation:sg-ab-pulse 2.2s ease-in-out infinite}}' .
-			'@keyframes sg-ab-pulse{0%,100%{box-shadow:0 0 0 2px rgba(245,158,11,.35)}50%{box-shadow:0 0 0 6px rgba(245,158,11,.1)}}'
+			'@keyframes sg-ab-pulse{0%,100%{box-shadow:0 0 0 2px rgba(245,158,11,.35)}50%{box-shadow:0 0 0 6px rgba(245,158,11,.1)}}' .
+			// Core hides every top-level item it does not know on a narrow
+			// screen. Keep the status as a dot there: it is the one thing an
+			// editor on a phone needs to see, and the drop-down still opens.
+			'@media screen and (max-width:782px){#wpadminbar li#wp-admin-bar-stillgate{display:block}#wpadminbar #wp-admin-bar-stillgate>.ab-item{justify-content:center;min-width:46px;padding:0 12px}#wpadminbar #wp-admin-bar-stillgate .ab-label{display:none}#wpadminbar .sg-ab-dot{width:14px;height:14px}}'
 		);
 	}
 

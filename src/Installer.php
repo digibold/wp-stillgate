@@ -116,6 +116,10 @@ final class Installer {
 		delete_option( FreezeService::OPTION_SCOPE );
 		delete_option( Receipt::OPTION );
 
+		foreach ( Scope::KINDS as $kind ) {
+			delete_option( Receipt::COUNTER_PREFIX . $kind );
+		}
+
 		self::revoke_capability_from_all_roles();
 	}
 

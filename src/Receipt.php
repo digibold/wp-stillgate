@@ -36,6 +36,19 @@ final class Receipt {
 	public const OPTION = 'deployment_guard_receipt';
 
 	/**
+	 * Prefix of the two running counters of refused submissions, one option
+	 * per kind. Each refusal is one atomic increment of one small row, so
+	 * concurrent refusals are all counted and a counter write can never
+	 * overwrite a receipt that another request has just closed.
+	 */
+	public const COUNTER_PREFIX = 'deployment_guard_paused_';
+
+	/**
+	 * How far back an unnoticed scheduled window is still recorded.
+	 */
+	private const UNOBSERVED_WITHIN = 7 * DAY_IN_SECONDS;
+
+	/**
 	 * Most changed post IDs the receipt lists; the count is always exact.
 	 */
 	public const MAX_LISTED_IDS = 200;
@@ -76,8 +89,55 @@ final class Receipt {
 	 * @param mixed  $old_state Unused.
 	 * @param string $source    Where the change came from.
 	 */
-	public function on_state_changed( $new_state = null, $old_state = null, $source = 'ui' ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter -- the action passes three arguments; only the source matters.
+	public function on_state_changed( $new_state = null, $old_state = null, $source = 'ui' ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter -- the action passes three arguments; the new state is already held by the service.
+		$this->close_if_stale( $old_state );
 		$this->sync( is_string( $source ) ? $source : 'ui' );
+	}
+
+	/**
+	 * A receipt still open although the freeze it belonged to ran out
+	 * before this change (nobody opened wp-admin to notice, and a CLI or
+	 * REST request does not sync): close it where that freeze ended, so the
+	 * new freeze gets a receipt of its own instead of inheriting the old
+	 * start and counting the idle gap as frozen.
+	 *
+	 * @param mixed $old_state The state before the change.
+	 */
+	private function close_if_stale( $old_state ): void {
+		$data = $this->data();
+
+		if ( null === $data['opened'] || null !== $data['closed'] || ! is_array( $old_state ) || null !== $this->service->forced() ) {
+			return;
+		}
+
+		$now = $this->now();
+		$old = FreezeConfig::from_array( $old_state );
+
+		if ( $old->is_active( $now ) ) {
+			return;
+		}
+
+		$this->close( $this->closing_time( $old, $data, $now ) );
+	}
+
+	/**
+	 * When a freeze that is no longer active ended: at the end of its window
+	 * if that is what ran out during this receipt, otherwise now. Never
+	 * before the receipt opened, which a leftover window from an earlier
+	 * freeze would otherwise cause.
+	 *
+	 * @param FreezeConfig         $config The configuration the freeze ended under.
+	 * @param array<string, mixed> $data   The whole receipt.
+	 * @param int                  $now    The current time.
+	 */
+	private function closing_time( FreezeConfig $config, array $data, int $now ): int {
+		$opened = (int) $data['opened'];
+
+		if ( ! $config->enabled && null !== $config->schedule_end && $config->schedule_end <= $now && $config->schedule_end >= $opened ) {
+			return $config->schedule_end;
+		}
+
+		return max( $opened, $now );
 	}
 
 	/**
@@ -103,10 +163,10 @@ final class Receipt {
 		$active = $this->service->is_active();
 		$data   = $this->data();
 		$open   = null !== $data['opened'] && null === $data['closed'];
+		$config = $this->service->config();
 
 		if ( $active && ! $open ) {
-			$config = $this->service->config();
-			$start  = $now;
+			$start = $now;
 
 			if ( ! $config->enabled && 'active' === $config->schedule_status( $now ) && null !== $config->schedule_start ) {
 				// A scheduled window is dated from its own start, not from
@@ -116,16 +176,58 @@ final class Receipt {
 
 			$this->open( $start, $source );
 		} elseif ( ! $active && $open ) {
-			$config = $this->service->config();
-			$end    = $now;
-
-			if ( null !== $config->schedule_end && $config->schedule_end <= $now ) {
-				// A window that ran out ended when it said it would.
-				$end = $config->schedule_end;
-			}
-
-			$this->close( $end );
+			$this->close( $this->closing_time( $config, $data, $now ) );
+		} elseif ( ! $active ) {
+			$this->record_unobserved_window( $config, $data, $now );
 		}
+	}
+
+	/**
+	 * A scheduled window that began and ended between two requests that could
+	 * sync leaves no receipt of its own, and the previous freeze's receipt
+	 * would then be read as the latest. Record it as a closed receipt that
+	 * says nobody was there to see what changed, so a script does not take an
+	 * older clean receipt for this freeze.
+	 *
+	 * @param FreezeConfig         $config The stored configuration.
+	 * @param array<string, mixed> $data   The whole receipt.
+	 * @param int                  $now    The current time.
+	 */
+	private function record_unobserved_window( FreezeConfig $config, array $data, int $now ): void {
+		$start = $config->schedule_start;
+		$end   = $config->schedule_end;
+
+		if ( null === $start || null === $end || $end > $now || $end < $now - self::UNOBSERVED_WITHIN ) {
+			return;
+		}
+
+		if ( null !== $data['opened'] && $end <= (int) ( $data['closed'] ?? 0 ) ) {
+			return;
+		}
+
+		$counters = $this->counters();
+
+		$this->save(
+			array(
+				'v'           => 1,
+				'opened'      => $start,
+				'closed'      => $end,
+				'source'      => 'detected',
+				'unverified'  => true,
+				'baseline'    => array(),
+				'final'       => array( 'paused' => $counters ),
+				'paused_base' => $this->paused_base( $data ),
+			)
+		);
+	}
+
+	/**
+	 * When the receipt that is still open began, or null when none is.
+	 */
+	public function opened_at(): ?int {
+		$data = $this->data();
+
+		return null !== $data['opened'] && null === $data['closed'] ? (int) $data['opened'] : null;
 	}
 
 	/**
@@ -134,35 +236,74 @@ final class Receipt {
 	 * @param string $kind One of Scope::KINDS.
 	 */
 	public function count_paused( string $kind ): void {
-		if ( ! in_array( $kind, Scope::KINDS, true ) ) {
+		if ( ! in_array( $kind, Scope::KINDS, true ) || ! $this->service->is_active() ) {
 			return;
 		}
 
-		$this->sync();
+		// Never opens a receipt (and so never scans the database) on a
+		// visitor's request: the next request that can sync opens it, and
+		// takes in what was counted before, because the counters are
+		// running totals.
+		$this->increment( $kind );
+	}
 
-		$data = $this->data();
+	private function increment( string $kind ): void {
+		global $wpdb;
 
-		if ( null === $data['opened'] || null !== $data['closed'] ) {
-			return;
+		$name = self::COUNTER_PREFIX . $kind;
+
+		if ( false === get_option( $name, false ) ) {
+			add_option( $name, '0', '', false );
 		}
 
-		$data['paused'][ $kind ] = (int) ( $data['paused'][ $kind ] ?? 0 ) + 1;
-		$this->save( $data );
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- an atomic increment is the point: a read-modify-write through update_option would lose counts under concurrent refusals; the cache entry is cleared on the next line.
+		$wpdb->query( $wpdb->prepare( "UPDATE {$wpdb->options} SET option_value = option_value + 1 WHERE option_name = %s", $name ) );
+		wp_cache_delete( $name, 'options' );
+	}
+
+	/**
+	 * The running totals of refused submissions.
+	 *
+	 * @return array<string, int>
+	 */
+	private function counters(): array {
+		$counters = array();
+
+		foreach ( Scope::KINDS as $kind ) {
+			$counters[ $kind ] = (int) get_option( self::COUNTER_PREFIX . $kind, 0 );
+		}
+
+		return $counters;
+	}
+
+	/**
+	 * Where a new receipt starts counting: at the totals when the previous
+	 * receipt closed, so refusals that happened before anyone noticed the
+	 * freeze began belong to the new receipt.
+	 *
+	 * @param array<string, mixed> $previous The receipt being replaced.
+	 * @return array<string, int>
+	 */
+	private function paused_base( array $previous ): array {
+		$base = array();
+
+		foreach ( Scope::KINDS as $kind ) {
+			$base[ $kind ] = isset( $previous['final']['paused'][ $kind ] ) ? (int) $previous['final']['paused'][ $kind ] : 0;
+		}
+
+		return $base;
 	}
 
 	private function open( int $at, string $source ): void {
 		$this->save(
 			array(
-				'v'        => 1,
-				'opened'   => $at,
-				'closed'   => null,
-				'source'   => $source,
-				'baseline' => $this->capture(),
-				'final'    => null,
-				'paused'   => array(
-					Scope::COMMENTS => 0,
-					Scope::FORMS    => 0,
-				),
+				'v'           => 1,
+				'opened'      => $at,
+				'closed'      => null,
+				'source'      => $source,
+				'baseline'    => $this->capture(),
+				'final'       => null,
+				'paused_base' => $this->paused_base( $this->data() ),
 			)
 		);
 	}
@@ -179,6 +320,7 @@ final class Receipt {
 		$final['changed']  = $this->changed_posts( $from, $at, $this->baseline_max_id( $data ) );
 		$final['deleted']  = $this->deleted_estimate( is_array( $data['baseline'] ) ? $data['baseline'] : array(), $final, $from, $at );
 		$final['comments'] = $this->comments_added( $from, $at );
+		$final['paused']   = $this->counters();
 
 		$data['closed'] = $at;
 		$data['final']  = $final;
@@ -198,6 +340,26 @@ final class Receipt {
 			return array(
 				'state' => 'none',
 				'clean' => null,
+			);
+		}
+
+		if ( ! empty( $data['unverified'] ) ) {
+			return array(
+				'state'      => 'closed',
+				'opened_at'  => gmdate( 'c', (int) $data['opened'] ),
+				'closed_at'  => gmdate( 'c', (int) $data['closed'] ),
+				'source'     => (string) $data['source'],
+				'clean'      => null,
+				'unverified' => true,
+				'content'    => array(
+					'changed_posts'    => 0,
+					'changed_ids'      => array(),
+					'ids_truncated'    => false,
+					'deleted_estimate' => 0,
+					'terms_changed'    => false,
+					'comments_added'   => 0,
+				),
+				'paused'     => $this->paused_since( $data, $data['final']['paused'] ?? array() ),
 			);
 		}
 
@@ -226,11 +388,26 @@ final class Receipt {
 				'terms_changed'    => $terms,
 				'comments_added'   => $added,
 			),
-			'paused'    => array(
-				Scope::COMMENTS => (int) ( $data['paused'][ Scope::COMMENTS ] ?? 0 ),
-				Scope::FORMS    => (int) ( $data['paused'][ Scope::FORMS ] ?? 0 ),
-			),
+			'paused'    => $this->paused_since( $data, null === $final ? $this->counters() : ( $final['paused'] ?? array() ) ),
 		);
+	}
+
+	/**
+	 * Refused submissions during this receipt: the running totals now (or
+	 * when it closed) less the totals when it opened.
+	 *
+	 * @param array<string, mixed> $data   The whole receipt.
+	 * @param array<string, mixed> $totals The running totals to compare.
+	 * @return array<string, int>
+	 */
+	private function paused_since( array $data, array $totals ): array {
+		$paused = array();
+
+		foreach ( Scope::KINDS as $kind ) {
+			$paused[ $kind ] = max( 0, (int) ( $totals[ $kind ] ?? 0 ) - (int) ( $data['paused_base'][ $kind ] ?? 0 ) );
+		}
+
+		return $paused;
 	}
 
 	/**
@@ -301,9 +478,18 @@ final class Receipt {
 		$changed = "( {$modified} )";
 
 		if ( null !== $above_id ) {
-			$changed .= ' OR ID > %d';
-			$args[]   = $above_id;
-			$changed  = "( {$changed} )";
+			$newer  = 'ID > %d';
+			$args[] = $above_id;
+
+			if ( null !== $until ) {
+				// A receipt noticed late is closed at the time the freeze
+				// ended; a post created afterwards is not blamed on it. A
+				// brand-new draft has no GMT date to compare, and stays in.
+				$newer .= " AND ( post_date_gmt <= %s OR post_date_gmt = '0000-00-00 00:00:00' )";
+				$args[] = gmdate( 'Y-m-d H:i:s', $until );
+			}
+
+			$changed = "( {$changed} OR ( {$newer} ) )";
 		}
 
 		$where = "post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft' AND {$changed}";
@@ -372,6 +558,11 @@ final class Receipt {
 			// brand-new draft, whose creation dates are zero.
 			$args  = array_merge( $types, array( (int) $baseline['max_id'] ) );
 			$where = "post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft' AND ID > %d";
+
+			if ( null !== $until ) {
+				$where .= " AND ( post_date_gmt <= %s OR post_date_gmt = '0000-00-00 00:00:00' )";
+				$args[] = gmdate( 'Y-m-d H:i:s', $until );
+			}
 		} else {
 			$args  = array_merge( $types, array( gmdate( 'Y-m-d H:i:s', $from ) ) );
 			$upper = '';
@@ -483,10 +674,6 @@ final class Receipt {
 					'source'   => '',
 					'baseline' => array(),
 					'final'    => null,
-					'paused'   => array(
-						Scope::COMMENTS => 0,
-						Scope::FORMS    => 0,
-					),
 				),
 				is_array( $stored ) ? $stored : array()
 			);

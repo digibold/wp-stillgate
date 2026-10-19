@@ -40,7 +40,7 @@ final class FormResponsesTest extends TestCase {
 		$answer = $this->responses->ajax( 'nf_ajax_submit', self::MESSAGE );
 
 		$this->assertSame( 423, $answer['status'] );
-		$this->assertSame( self::MESSAGE, $answer['body']['errors']['form']['stillgate_forms_paused'] );
+		$this->assertSame( self::MESSAGE, $answer['body']['errors']['form']['email_not_sent'], 'the key its script does not treat as blocking' );
 		$this->assertIsArray( $answer['body']['data'], 'its script needs data to be an object' );
 		$this->assertSame( array(), $answer['body']['debug'] );
 	}
@@ -50,6 +50,17 @@ final class FormResponsesTest extends TestCase {
 
 		$this->assertSame( 423, $answer['status'] );
 		$this->assertSame( array( self::MESSAGE ), $answer['body']['errors']['stillgate_forms_paused'] );
+	}
+
+	public function test_formidable_gets_a_2xx_html_answer_so_its_script_shows_the_message(): void {
+		$answer = $this->responses->ajax( 'frm_entries_create', self::MESSAGE );
+
+		$this->assertSame( 200, $answer['status'], 'any other status makes its script submit the form natively' );
+		$this->assertSame( 'text/html; charset=UTF-8', $answer['content_type'], 'its script calls replace() on the answer' );
+		$this->assertFalse( $answer['body']['pass'] );
+		$this->assertSame( '', $answer['body']['content'] );
+		$this->assertStringContainsString( 'Forms are paused until 14:00 &amp; back soon.', $answer['body']['errors']['stillgate_forms_paused'] );
+		$this->assertArrayHasKey( 'error_message', $answer['body'] );
 	}
 
 	public function test_forminator_gets_a_2xx_answer_with_an_escaped_message(): void {
@@ -72,6 +83,7 @@ final class FormResponsesTest extends TestCase {
 
 	public function test_an_unknown_form_gets_the_plain_423_error_with_a_code(): void {
 		$answer = $this->responses->ajax( 'something_else', self::MESSAGE );
+		$this->assertArrayNotHasKey( 'content_type', $answer );
 
 		$this->assertSame( 423, $answer['status'] );
 		$this->assertSame( 'stillgate_forms_paused', $answer['body']['data']['code'] );

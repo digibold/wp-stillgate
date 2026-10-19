@@ -94,15 +94,32 @@ final class FormGate {
 	 * Ordinary (non-AJAX, non-REST) form posts.
 	 */
 	public function guard_post_request(): void {
-		// admin-ajax.php is the AJAX check's business. A front-end request
-		// that merely defines DOING_AJAX (Everest Forms does, for its own
-		// endpoint) is still an ordinary form post and is inspected here.
-		if ( ! Input::is_post() || ( wp_doing_ajax() && is_admin() ) || $this->looks_like_rest_request() ) {
+		if ( ! Input::is_post() ) {
+			return;
+		}
+
+		// A request is left to the AJAX or REST check only when that check
+		// will actually recognize it. The URL alone decides nothing: the
+		// sender chooses it, and a form plugin that reads its POST fields on
+		// init runs before WordPress has dispatched an AJAX action or a REST
+		// route, so the same body sent to /wp-json/x or to admin-ajax.php
+		// with an unlisted action must still be inspected here. A front-end
+		// request that merely defines DOING_AJAX (Everest Forms does, for its
+		// own endpoint) is an ordinary form post too.
+		if ( wp_doing_ajax() && is_admin() && in_array( Input::key( 'action' ), $this->requests()['ajax_actions'], true ) ) {
+			return;
+		}
+
+		if ( $this->route_is_gated( $this->request_rest_route() ) ) {
 			return;
 		}
 
 		if ( ! $this->post_fields_match() || ! $this->paused() ) {
 			return;
+		}
+
+		if ( ! headers_sent() ) {
+			header( 'X-Stillgate-Paused: forms' );
 		}
 
 		wp_die(
@@ -139,6 +156,17 @@ final class FormGate {
 			header( 'X-Stillgate-Paused: forms' );
 		}
 
+		if ( isset( $answer['content_type'] ) ) {
+			// A plugin whose script cannot take a JSON content type.
+			if ( ! headers_sent() ) {
+				status_header( $answer['status'] );
+				header( 'Content-Type: ' . $answer['content_type'] );
+			}
+
+			echo wp_json_encode( $answer['body'] ); // phpcs:ignore WordPress.Security.EscapeOutput.OutputNotEscaped -- JSON built from fixed keys; the visitor message is escaped in FormResponses.
+			wp_die( '', '', array( 'response' => null ) );
+		}
+
 		wp_send_json( $answer['body'], $answer['status'] );
 	}
 
@@ -155,14 +183,7 @@ final class FormGate {
 			return $result;
 		}
 
-		$matched = false;
-
-		foreach ( $this->requests()['rest_routes'] as $pattern ) {
-			if ( 1 === preg_match( $pattern, $request->get_route() ) ) {
-				$matched = true;
-				break;
-			}
-		}
+		$matched = $this->route_is_gated( $request->get_route() );
 
 		if ( ! $matched || ! $this->paused() ) {
 			return $result;
@@ -210,19 +231,47 @@ final class FormGate {
 	}
 
 	/**
-	 * A REST request is recognized by its URL: this runs on `init`, before
-	 * WordPress has decided whether the request is one.
+	 * The REST route a request is addressed to, read from its URL: this
+	 * runs on `init`, before WordPress has decided whether the request is
+	 * one. Null when the URL is not a REST URL.
 	 */
-	private function looks_like_rest_request(): bool {
-		if ( Input::present( 'rest_route', 'GET' ) ) {
-			return true;
+	private function request_rest_route(): ?string {
+		$query_route = Input::string( 'rest_route', 'GET' );
+
+		if ( '' !== $query_route ) {
+			return '/' . ltrim( $query_route, '/' );
 		}
 
 		$uri    = isset( $_SERVER['REQUEST_URI'] ) ? (string) wp_unslash( $_SERVER['REQUEST_URI'] ) : ''; // phpcs:ignore WordPress.Security.ValidatedSanitizedInput.InputNotSanitized -- only compared against a fixed prefix, never output or stored.
-		$path   = (string) wp_parse_url( $uri, PHP_URL_PATH );
+		$path   = rawurldecode( (string) wp_parse_url( $uri, PHP_URL_PATH ) );
 		$prefix = (string) wp_parse_url( home_url( '/' . rest_get_url_prefix() . '/' ), PHP_URL_PATH );
 
-		return '' !== $prefix && 0 === strpos( $path, $prefix );
+		if ( '' === $prefix || 0 !== strncasecmp( $path, $prefix, strlen( $prefix ) ) ) {
+			return null;
+		}
+
+		return '/' . ltrim( substr( $path, strlen( $prefix ) ), '/' );
+	}
+
+	/**
+	 * Whether a REST route is one the REST check refuses. WordPress matches
+	 * routes without regard to case, so the patterns are matched the same
+	 * way; otherwise /Contact-Form-7/... would reach the form unchecked.
+	 *
+	 * @param string|null $route The REST route, or null.
+	 */
+	private function route_is_gated( ?string $route ): bool {
+		if ( null === $route ) {
+			return false;
+		}
+
+		foreach ( $this->requests()['rest_routes'] as $pattern ) {
+			if ( 1 === preg_match( $pattern . 'i', $route ) ) {
+				return true;
+			}
+		}
+
+		return false;
 	}
 
 	/**
@@ -247,10 +296,12 @@ final class FormGate {
 			return self::DEFAULT_REQUESTS;
 		}
 
+		// A key left out falls back to the built-in list; to recognize
+		// nothing of a kind, return it as an empty array.
 		return array(
-			'ajax_actions' => isset( $requests['ajax_actions'] ) && is_array( $requests['ajax_actions'] ) ? array_values( array_filter( $requests['ajax_actions'], 'is_string' ) ) : array(),
-			'rest_routes'  => isset( $requests['rest_routes'] ) && is_array( $requests['rest_routes'] ) ? array_values( array_filter( $requests['rest_routes'], 'is_string' ) ) : array(),
-			'post_fields'  => isset( $requests['post_fields'] ) && is_array( $requests['post_fields'] ) ? $requests['post_fields'] : array(),
+			'ajax_actions' => isset( $requests['ajax_actions'] ) && is_array( $requests['ajax_actions'] ) ? array_values( array_filter( $requests['ajax_actions'], 'is_string' ) ) : self::DEFAULT_REQUESTS['ajax_actions'],
+			'rest_routes'  => isset( $requests['rest_routes'] ) && is_array( $requests['rest_routes'] ) ? array_values( array_filter( $requests['rest_routes'], 'is_string' ) ) : self::DEFAULT_REQUESTS['rest_routes'],
+			'post_fields'  => isset( $requests['post_fields'] ) && is_array( $requests['post_fields'] ) ? $requests['post_fields'] : self::DEFAULT_REQUESTS['post_fields'],
 		);
 	}
 }

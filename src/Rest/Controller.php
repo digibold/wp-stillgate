@@ -288,9 +288,12 @@ final class Controller {
 		$for     = $request->get_param( 'for' );
 		$seconds = null;
 
-		if ( is_string( $for ) && '' !== trim( $for ) ) {
+		// A supplied duration is always parsed, an empty one included: a
+		// pipeline whose variable is unset must get an error, not a freeze
+		// that quietly never ends.
+		if ( null !== $for ) {
 			try {
-				$seconds = DateInput::parse_duration( $for );
+				$seconds = DateInput::parse_duration( is_string( $for ) ? $for : '' );
 			} catch ( \DomainException $exception ) {
 				return $this->error( $exception->getMessage(), 400 );
 			}

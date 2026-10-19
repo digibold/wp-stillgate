@@ -33,6 +33,10 @@ final class ReceiptTest extends TestCase {
 		$this->service = new FreezeService( $clock, new \Digibold\DeploymentGuard\Suspension() );
 		$guard         = $this->make_guard( $this->service );
 		$this->receipt = new Receipt( $this->service, $guard, $clock );
+
+		// The plugin's own receipt (real clock) is hooked up by the test
+		// bootstrap too; these tests drive time themselves.
+		remove_all_actions( 'deployment_guard_state_changed' );
 		$this->receipt->register();
 		$this->login_as( 'administrator' );
 	}
@@ -284,6 +288,164 @@ final class ReceiptTest extends TestCase {
 		wp_update_post( array( 'ID' => $post, 'post_title' => 'Changed' ) );
 
 		$this->assertSame( array( $post ), $this->receipt->report()['content']['changed_ids'] );
+	}
+
+	public function test_a_leftover_expired_window_does_not_close_a_later_manual_freeze_before_it_opened(): void {
+		$post = $this->old_post();
+
+		// A timed freeze ran days ago and its window stays stored.
+		$this->clock['now'] = time() - 3 * DAY_IN_SECONDS;
+		$this->service->freeze_for( 600 );
+		$this->clock['now'] = time();
+		$this->receipt->sync();
+
+		$this->service->enable();
+		wp_update_post( array( 'ID' => $post, 'post_title' => 'Edited during the later freeze' ) );
+		$this->service->disable();
+
+		$report = $this->receipt->report();
+
+		$this->assertGreaterThanOrEqual( strtotime( $report['opened_at'] ), strtotime( $report['closed_at'] ), 'a receipt never closes before it opened' );
+		$this->assertSame( array( $post ), $report['content']['changed_ids'] );
+		$this->assertFalse( $report['clean'] );
+	}
+
+	public function test_a_receipt_left_open_by_an_expired_window_is_closed_when_the_next_freeze_begins(): void {
+		$post = $this->old_post();
+
+		// Nobody opened wp-admin, so nothing synced when the timer ran out.
+		$this->clock['now'] = time() - 3 * HOUR_IN_SECONDS;
+		$this->service->freeze_for( 1800 );
+		$old_opened = $this->receipt->report()['opened_at'];
+
+		wp_update_post( array( 'ID' => $post, 'post_title' => 'Edited while nothing was frozen' ) );
+
+		// Saved long before the second freeze: a few minutes is plenty.
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, array( 'post_modified_gmt' => gmdate( 'Y-m-d H:i:s', time() - 1800 ) ), array( 'ID' => $post ) );
+		clean_post_cache( $post );
+
+		$this->clock['now'] = time();
+		$this->service->freeze_for( 1800 );
+
+		$report = $this->receipt->report();
+
+		$this->assertNotSame( $old_opened, $report['opened_at'], 'the new freeze has a receipt of its own' );
+		$this->assertSame( 'open', $report['state'] );
+		$this->assertTrue( $report['clean'], 'the idle gap is not counted as frozen' );
+	}
+
+	public function test_a_window_nobody_saw_is_recorded_as_unverified_instead_of_leaving_an_older_receipt_standing(): void {
+		$base               = time() - 2 * HOUR_IN_SECONDS;
+		$this->clock['now'] = $base;
+		$this->service->schedule( $base + 60, $base + 600 );
+		$this->assertSame( 'none', $this->receipt->report()['state'] );
+
+		$this->clock['now'] = time();
+		$this->receipt->sync();
+
+		$report = $this->receipt->report();
+
+		$this->assertSame( 'closed', $report['state'] );
+		$this->assertTrue( $report['unverified'] );
+		$this->assertNull( $report['clean'], 'nothing can be promised about it' );
+		$this->assertSame( gmdate( 'c', $base + 60 ), $report['opened_at'] );
+		$this->assertSame( gmdate( 'c', $base + 600 ), $report['closed_at'] );
+
+		$this->receipt->sync();
+		$this->assertSame( $report, $this->receipt->report(), 'recorded once' );
+	}
+
+	public function test_an_old_window_is_not_recorded_as_unverified(): void {
+		$base               = time() - 10 * DAY_IN_SECONDS;
+		$this->clock['now'] = $base;
+		$this->service->schedule( $base + 60, $base + 600 );
+
+		$this->clock['now'] = time();
+		$this->receipt->sync();
+
+		$this->assertSame( 'none', $this->receipt->report()['state'] );
+	}
+
+	public function test_a_window_the_receipt_already_covers_is_not_recorded_twice(): void {
+		$this->clock['now'] = time() - HOUR_IN_SECONDS;
+		$this->service->freeze_for( 600 );
+		$this->clock['now'] = time();
+		$this->receipt->sync();
+
+		$report = $this->receipt->report();
+
+		$this->receipt->sync();
+
+		$this->assertSame( $report, $this->receipt->report() );
+		$this->assertArrayNotHasKey( 'unverified', $report );
+	}
+
+	public function test_counting_a_refusal_never_opens_a_receipt_and_the_counts_are_kept_for_the_next_one(): void {
+		$this->service->enable();
+		delete_option( Receipt::OPTION );
+		$this->receipt->forget();
+
+		$this->receipt->count_paused( 'forms' );
+		$this->receipt->count_paused( 'forms' );
+
+		$this->assertSame( 'none', $this->receipt->report()['state'], 'nothing is scanned on a visitor request' );
+
+		$this->receipt->sync();
+
+		$this->assertSame( 2, $this->receipt->report()['paused']['forms'] );
+	}
+
+	public function test_each_receipt_counts_only_its_own_refusals(): void {
+		$this->service->enable();
+		$this->receipt->count_paused( 'comments' );
+		$this->receipt->count_paused( 'comments' );
+		$this->service->disable();
+
+		$this->assertSame( 2, $this->receipt->report()['paused']['comments'] );
+
+		$this->service->enable();
+		$this->receipt->count_paused( 'comments' );
+
+		$this->assertSame( 1, $this->receipt->report()['paused']['comments'] );
+	}
+
+	public function test_a_closed_receipt_keeps_its_count_when_more_are_refused_afterwards(): void {
+		$this->service->enable();
+		$this->receipt->count_paused( 'forms' );
+		$this->service->disable();
+		$this->receipt->count_paused( 'forms' );
+
+		$this->assertSame( 1, $this->receipt->report()['paused']['forms'] );
+	}
+
+	public function test_the_counters_are_single_non_autoloaded_rows_incremented_in_place(): void {
+		$this->service->enable();
+		$this->receipt->count_paused( 'forms' );
+		$this->receipt->count_paused( 'forms' );
+		$this->receipt->count_paused( 'forms' );
+
+		global $wpdb;
+		$row = $wpdb->get_row( $wpdb->prepare( "SELECT option_value, autoload FROM {$wpdb->options} WHERE option_name = %s", 'deployment_guard_paused_forms' ), ARRAY_A );
+
+		$this->assertSame( '3', $row['option_value'] );
+		$this->assertNotSame( 'yes', $row['autoload'] );
+	}
+
+	public function test_a_receipt_closed_late_does_not_blame_posts_created_after_the_freeze_ended(): void {
+		$this->clock['now'] = time() - HOUR_IN_SECONDS;
+		$this->service->freeze_for( 600 );
+
+		// The window ended 50 minutes ago; this is created now.
+		$late = self::factory()->post->create( array( 'post_title' => 'Created long after the freeze' ) );
+
+		$this->clock['now'] = time();
+		$this->receipt->sync();
+
+		$report = $this->receipt->report();
+
+		$this->assertNotContains( $late, $report['content']['changed_ids'] );
+		$this->assertTrue( $report['clean'] );
 	}
 
 	public function test_a_new_freeze_starts_a_new_receipt(): void {

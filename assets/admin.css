@@ -19,7 +19,7 @@
 }
 
 .stillgate .sg-tagline {
-	margin-left: 10px;
+	margin-inline-start: 10px;
 	color: var(--sg-muted);
 	font-size: 14px;
 	vertical-align: middle;
@@ -36,23 +36,23 @@
 	margin: 18px 0 20px;
 	padding: 22px 26px;
 	border: 1px solid var(--sg-line);
-	border-left-width: 6px;
+	border-inline-start-width: 6px;
 	border-radius: var(--sg-radius);
 	background: var(--sg-card);
 }
 
 .stillgate .sg-hero--active {
-	border-left-color: var(--sg-active-edge);
+	border-inline-start-color: var(--sg-active-edge);
 	background: var(--sg-active-bg);
 }
 
 .stillgate .sg-hero--idle {
-	border-left-color: var(--sg-idle-edge);
+	border-inline-start-color: var(--sg-idle-edge);
 	background: var(--sg-idle-bg);
 }
 
 .stillgate .sg-hero--upcoming {
-	border-left-color: var(--sg-soon-edge);
+	border-inline-start-color: var(--sg-soon-edge);
 	background: var(--sg-soon-bg);
 }
 
@@ -133,7 +133,7 @@
 }
 
 .stillgate .sg-actions-label {
-	margin-right: 6px;
+	margin-inline-end: 6px;
 	font-size: 13px;
 	color: var(--sg-muted);
 }
@@ -246,7 +246,8 @@
 
 .stillgate .sg-card .form-table th,
 .stillgate .sg-card .form-table td {
-	padding: 6px 10px 6px 0;
+	padding-block: 6px;
+	padding-inline: 0 10px;
 }
 
 .stillgate .sg-card .form-table th {
@@ -325,9 +326,10 @@
 
 .stillgate .sg-details th,
 .stillgate .sg-details td {
-	padding: 7px 8px 7px 0;
+	padding-block: 7px;
+	padding-inline: 0 8px;
 	border-bottom: 1px solid #f0f0f1;
-	text-align: left;
+	text-align: start;
 	vertical-align: top;
 	font-size: 13px;
 }
