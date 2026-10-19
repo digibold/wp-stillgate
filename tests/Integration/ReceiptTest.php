@@ -95,6 +95,38 @@ final class ReceiptTest extends TestCase {
 		$this->assertNotContains( $untouched, $report['content']['changed_ids'] );
 	}
 
+	public function test_a_new_draft_is_listed_although_wordpress_stores_it_with_a_zero_modified_time(): void {
+		$this->old_post();
+		$this->service->enable();
+
+		$draft = self::factory()->post->create( array( 'post_status' => 'draft', 'post_title' => 'Drafted during the freeze', 'post_date' => '', 'post_date_gmt' => '' ) );
+
+		global $wpdb;
+		// WordPress leaves a new draft's GMT dates at zero until it is saved
+		// again; make sure the fixture really looks like that.
+		$wpdb->update( $wpdb->posts, array( 'post_modified_gmt' => '0000-00-00 00:00:00', 'post_date_gmt' => '0000-00-00 00:00:00' ), array( 'ID' => $draft ) );
+		clean_post_cache( $draft );
+
+		$report = $this->receipt->report();
+
+		$this->assertContains( $draft, $report['content']['changed_ids'] );
+		$this->assertFalse( $report['clean'] );
+	}
+
+	public function test_a_new_draft_does_not_hide_a_deletion_in_the_estimate(): void {
+		$doomed = $this->old_post( 'Will be deleted' );
+		$this->old_post( 'Stays' );
+
+		$this->service->enable();
+		$draft = self::factory()->post->create( array( 'post_status' => 'draft' ) );
+
+		global $wpdb;
+		$wpdb->update( $wpdb->posts, array( 'post_modified_gmt' => '0000-00-00 00:00:00', 'post_date_gmt' => '0000-00-00 00:00:00' ), array( 'ID' => $draft ) );
+		wp_delete_post( $doomed, true );
+
+		$this->assertSame( 1, $this->receipt->report()['content']['deleted_estimate'] );
+	}
+
 	public function test_a_new_post_created_during_the_freeze_is_listed(): void {
 		$this->service->enable();
 		$new = self::factory()->post->create( array( 'post_title' => 'Created during' ) );

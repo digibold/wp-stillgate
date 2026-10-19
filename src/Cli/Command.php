@@ -188,8 +188,9 @@ final class Command {
 	 * : Pause new visitor comments, reviews, pingbacks and trackbacks during a freeze.
 	 *
 	 * [--forms=<on|off>]
-	 * : Pause visitor submissions of contact and other forms (Contact Form 7,
-	 * WPForms, Gravity Forms, Ninja Forms, Fluent Forms, Forminator and more)
+	 * : Pause visitor submissions of contact and other forms (tested with
+	 * Contact Form 7, WPForms, Ninja Forms, Fluent Forms, Forminator,
+	 * Formidable and Everest Forms; others can be added with a filter)
 	 * during a freeze.
 	 *
 	 * ## EXAMPLES

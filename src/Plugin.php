@@ -106,7 +106,7 @@ final class Plugin {
 		}
 
 		$content = '<p class="privacy-policy-tutorial">' . esc_html__(
-			'While Stillgate is active, it keeps a short local log of who enabled or disabled it, when scheduled freezes were changed, and which logged-in users attempted to make changes that were blocked. Each entry stores a user ID, a timestamp, and a short description of what was attempted; it never stores page content, form data, or IP addresses. This log stays in your site\'s own database, is never transmitted anywhere, and is limited to a fixed number of entries.',
+			'While Stillgate is active, it keeps a short local log of who enabled or disabled it, when scheduled freezes were changed, and which logged-in users attempted to make changes that were blocked. Each entry stores a user ID, a timestamp, and a short description of what was attempted; it never stores page content, form data, or IP addresses. This log stays in your site\'s own database, is never transmitted anywhere, and is limited to a fixed number of entries. If you choose to pause comments or forms during a freeze, Stillgate counts the submissions it refuses and stores only that number, never the comment, the form data, or who sent it. A short receipt of the latest freeze keeps timestamps, counts and the IDs of posts that changed, never their content.',
 			'stillgate'
 		) . '</p>';
 

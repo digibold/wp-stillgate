@@ -218,6 +218,7 @@
 .stillgate .sg-grid {
 	display: grid;
 	grid-template-columns: repeat(auto-fit, minmax(340px, 1fr));
+	align-items: start;
 	gap: 18px;
 	margin-bottom: 22px;
 }
@@ -313,7 +314,8 @@
 	color: #f0f0f1;
 	font-size: 12px;
 	line-height: 1.55;
-	white-space: pre;
+	white-space: pre-wrap;
+	overflow-wrap: anywhere;
 }
 
 .stillgate .sg-details {
@@ -357,4 +359,8 @@
 	.stillgate .sg-hero { padding: 16px; }
 	.stillgate .sg-grid { grid-template-columns: 1fr; }
 	.stillgate .sg-facts { grid-template-columns: 1fr; }
+}
+
+.stillgate .sg-save-note {
+	margin: 8px 0 0;
 }

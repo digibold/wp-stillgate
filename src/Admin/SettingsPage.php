@@ -574,13 +574,21 @@ final class SettingsPage {
 
 		echo '</p>';
 
+		$opened = $this->format_datetime( (int) strtotime( (string) $report['opened_at'] ), $timezone );
+
 		echo '<p class="description">' . esc_html(
-			sprintf(
-				/* translators: 1: freeze start, 2: freeze end or "still running". */
-				__( '%1$s to %2$s', 'stillgate' ),
-				$this->format_datetime( (int) strtotime( (string) $report['opened_at'] ), $timezone ),
-				null !== $report['closed_at'] ? $this->format_datetime( (int) strtotime( (string) $report['closed_at'] ), $timezone ) : __( 'still running', 'stillgate' )
-			)
+			null === $report['closed_at']
+				? sprintf(
+					/* translators: %s: when the running freeze began. */
+					__( 'Since %s', 'stillgate' ),
+					$opened
+				)
+				: sprintf(
+					/* translators: 1: freeze start, 2: freeze end. */
+					__( '%1$s to %2$s', 'stillgate' ),
+					$opened,
+					$this->format_datetime( (int) strtotime( (string) $report['closed_at'] ), $timezone )
+				)
 		) . '</p>';
 
 		echo '<ul class="sg-facts">';
@@ -620,7 +628,7 @@ final class SettingsPage {
 	}
 
 	private function fact( int $count, string $label, bool $as_yes_no = false ): void {
-		$value = $as_yes_no ? ( $count > 0 ? __( 'yes', 'stillgate' ) : __( 'no', 'stillgate' ) ) : (string) $count;
+		$value = $as_yes_no ? ( $count > 0 ? __( 'some', 'stillgate' ) : '0' ) : (string) $count;
 
 		echo '<li><strong>' . esc_html( $value ) . '</strong> ' . esc_html( $label ) . '</li>';
 	}
@@ -640,11 +648,11 @@ final class SettingsPage {
 		echo '<p><label><input type="checkbox" name="scope_comments" value="1"' . checked( $scope->comments, true, false ) . disabled( $can_change, false, false ) . ' /> <strong>' . esc_html__( 'Visitor comments', 'stillgate' ) . '</strong></label><br />';
 		echo '<span class="description">' . esc_html__( 'New comments, reviews, pingbacks and trackbacks are refused with a friendly message. Order notes and other internal comments keep working.', 'stillgate' ) . '</span></p>';
 		echo '<p><label><input type="checkbox" name="scope_forms" value="1"' . checked( $scope->forms, true, false ) . disabled( $can_change, false, false ) . ' /> <strong>' . esc_html__( 'Contact and other forms', 'stillgate' ) . '</strong></label><br />';
-		echo '<span class="description">' . esc_html__( 'Submissions to Contact Form 7, WPForms, Gravity Forms, Ninja Forms, Fluent Forms, Forminator, Formidable and Everest Forms are refused. Shops keep taking orders.', 'stillgate' ) . '</span></p>';
+		echo '<span class="description">' . esc_html__( 'Visitor submissions to the common form plugins are refused; tested with Contact Form 7, WPForms, Ninja Forms, Fluent Forms, Forminator, Formidable and Everest Forms. Shops keep taking orders.', 'stillgate' ) . '</span></p>';
 		echo '</fieldset>';
 
-		echo '<button type="submit" class="button"' . disabled( $can_change, false, false ) . '>' . esc_html__( 'Save', 'stillgate' ) . '</button> ';
-		echo '<span class="description">' . esc_html__( 'Applies at once, even to a freeze that is already running.', 'stillgate' ) . '</span>';
+		echo '<button type="submit" class="button"' . disabled( $can_change, false, false ) . '>' . esc_html__( 'Save', 'stillgate' ) . '</button>';
+		echo '<p class="description sg-save-note">' . esc_html__( 'Applies at once, even to a freeze that is already running.', 'stillgate' ) . '</p>';
 		echo '</form>';
 		$this->close_card();
 	}

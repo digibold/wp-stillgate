@@ -176,7 +176,7 @@ final class Receipt {
 		// recalculating a rating a second after the freeze ended would drop
 		// the product from the list a deploy script is about to export).
 		$final             = $this->capture();
-		$final['changed']  = $this->changed_posts( $from, $at );
+		$final['changed']  = $this->changed_posts( $from, $at, $this->baseline_max_id( $data ) );
 		$final['deleted']  = $this->deleted_estimate( is_array( $data['baseline'] ) ? $data['baseline'] : array(), $final, $from, $at );
 		$final['comments'] = $this->comments_added( $from, $at );
 
@@ -207,7 +207,7 @@ final class Receipt {
 		$final   = ! $open && is_array( $data['final'] ) ? $data['final'] : null;
 		$current = null === $final ? $this->capture() : $final;
 		$frozen  = null !== $final && isset( $final['changed'], $final['deleted'], $final['comments'] );
-		$changed = $frozen ? $final['changed'] : $this->changed_posts( $from, $until );
+		$changed = $frozen ? $final['changed'] : $this->changed_posts( $from, $until, $this->baseline_max_id( $data ) );
 		$deleted = $frozen ? (int) $final['deleted'] : $this->deleted_estimate( $data['baseline'], $current, $from, $until );
 		$terms   = $this->terms_changed( $data['baseline'], $current );
 		$added   = $frozen ? (int) $final['comments'] : $this->comments_added( $from, $until );
@@ -252,13 +252,32 @@ final class Receipt {
 
 		$until = null === $data['closed'] ? null : (int) $data['closed'];
 
-		return $this->changed_posts( (int) $data['opened'], $until )['ids'];
+		return $this->changed_posts( (int) $data['opened'], $until, $this->baseline_max_id( $data ) )['ids'];
 	}
 
 	/**
+	 * The newest post ID when the receipt opened, if it was recorded.
+	 *
+	 * @param array<string, mixed> $data The whole receipt.
+	 */
+	private function baseline_max_id( array $data ): ?int {
+		return is_array( $data['baseline'] ) && isset( $data['baseline']['max_id'] ) ? (int) $data['baseline']['max_id'] : null;
+	}
+
+	/**
+	 * Posts saved, created or trashed since the receipt opened.
+	 *
+	 * A post is changed when it was modified since then, or when it is newer
+	 * than the newest post at that moment. The second test exists because
+	 * WordPress stores a brand-new draft with a zero modified time until it
+	 * is saved again, which the first test alone cannot see.
+	 *
+	 * @param int      $from      When the receipt opened.
+	 * @param int|null $until     When it closed, or null while it is open.
+	 * @param int|null $above_id  The newest post ID when it opened, if known.
 	 * @return array{count: int, ids: int[]}
 	 */
-	private function changed_posts( int $from, ?int $until ): array {
+	private function changed_posts( int $from, ?int $until, ?int $above_id = null ): array {
 		global $wpdb;
 
 		$types = $this->post_types();
@@ -272,16 +291,24 @@ final class Receipt {
 
 		$placeholders = implode( ', ', array_fill( 0, count( $types ), '%s' ) );
 		$args         = array_merge( $types, array( gmdate( 'Y-m-d H:i:s', $from ) ) );
-		$upper        = '';
+		$modified     = 'post_modified_gmt >= %s';
 
 		if ( null !== $until ) {
-			$upper  = ' AND post_modified_gmt <= %s';
-			$args[] = gmdate( 'Y-m-d H:i:s', $until );
+			$modified .= ' AND post_modified_gmt <= %s';
+			$args[]    = gmdate( 'Y-m-d H:i:s', $until );
 		}
 
-		$where = "post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft' AND post_modified_gmt >= %s{$upper}";
+		$changed = "( {$modified} )";
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- a read-only, one-off report that must see the live table; the dynamic part is only the list of %s placeholders built above, and every value is passed to prepare().
+		if ( null !== $above_id ) {
+			$changed .= ' OR ID > %d';
+			$args[]   = $above_id;
+			$changed  = "( {$changed} )";
+		}
+
+		$where = "post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft' AND {$changed}";
+
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- a read-only, one-off report that must see the live table; the dynamic part is only the list of placeholders built above, and every value is passed to prepare().
 		$count = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE {$where}", $args ) );
 		$ids   = $wpdb->get_col(
 			$wpdb->prepare(
@@ -339,15 +366,23 @@ final class Receipt {
 		}
 
 		$placeholders = implode( ', ', array_fill( 0, count( $types ), '%s' ) );
-		$args         = array_merge( $types, array( gmdate( 'Y-m-d H:i:s', $from ) ) );
-		$upper        = '';
 
-		if ( null !== $until ) {
-			$upper  = ' AND post_date_gmt <= %s';
-			$args[] = gmdate( 'Y-m-d H:i:s', $until );
+		if ( isset( $baseline['max_id'] ) ) {
+			// Newer than the newest post when the receipt opened: counts a
+			// brand-new draft, whose creation dates are zero.
+			$args  = array_merge( $types, array( (int) $baseline['max_id'] ) );
+			$where = "post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft' AND ID > %d";
+		} else {
+			$args  = array_merge( $types, array( gmdate( 'Y-m-d H:i:s', $from ) ) );
+			$upper = '';
+
+			if ( null !== $until ) {
+				$upper  = ' AND post_date_gmt <= %s';
+				$args[] = gmdate( 'Y-m-d H:i:s', $until );
+			}
+
+			$where = "post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft' AND post_date_gmt >= %s{$upper}";
 		}
-
-		$where = "post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft' AND post_date_gmt >= %s{$upper}";
 
 		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- read-only one-off report; see changed_posts().
 		$created = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE {$where}", $args ) );
@@ -388,7 +423,7 @@ final class Receipt {
 	 * A cheap picture of the content right now: the number of protected
 	 * posts and a checksum of the protected terms.
 	 *
-	 * @return array{posts: int, terms: string}
+	 * @return array{posts: int, terms: string, max_id: int}
 	 */
 	private function capture(): array {
 		global $wpdb;
@@ -423,9 +458,13 @@ final class Receipt {
 			}
 		}
 
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching -- read-only snapshot; no user input.
+		$max_id = (int) $wpdb->get_var( "SELECT COALESCE( MAX( ID ), 0 ) FROM {$wpdb->posts}" );
+
 		return array(
-			'posts' => $post_total,
-			'terms' => $terms,
+			'posts'  => $post_total,
+			'terms'  => $terms,
+			'max_id' => $max_id,
 		);
 	}
 
