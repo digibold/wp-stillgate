@@ -476,6 +476,21 @@ final class Guard {
 	}
 
 	/**
+	 * Whether the current user natively holds any capability a freeze can
+	 * restrict, so a notice or the admin-bar indicator is worth showing
+	 * them. Deliberately broader than any single request's target: it
+	 * decides whether to inform, not whether something is blocked.
+	 */
+	public function could_be_affected(): bool {
+		foreach ( array( 'edit_posts', 'upload_files', 'edit_theme_options', 'edit_terms', 'assign_terms' ) as $cap ) {
+			if ( current_user_can( $cap ) ) {
+				return true;
+			}
+		}
+
+		return false;
+	}
+	/**
 	 * Whether visitor submissions of the given kind are paused for the
 	 * current request: a freeze is active, the site chose to pause that
 	 * kind (see Scope), and the actor is not somebody who can bypass the

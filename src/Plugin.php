@@ -55,17 +55,23 @@ final class Plugin {
 		( new Enforcement\DataLayerGuard( $guard ) )->register();
 		( new Enforcement\ScheduledPublishGuard( $this->service, $guard ) )->register();
 
+		$receipt = new Receipt( $this->service, $guard, $clock );
+		$receipt->register();
+
 		// Web-only gates. is_admin() also covers admin-ajax.php requests,
 		// which WordPress itself treats as admin context.
 		if ( is_admin() ) {
 			( new Enforcement\AdminGate( $guard ) )->register();
 			( new Enforcement\AjaxGate( $guard ) )->register();
-			( new Admin\SettingsPage( $this->service, $guard ) )->register();
+			( new Admin\SettingsPage( $this->service, $guard, $receipt, plugins_url( 'assets/', $this->file ) ) )->register();
 			( new Admin\Notices( $guard ) )->register();
+			( new Admin\QuickActions( $this->service ) )->register();
+			( new Admin\SiteHealth( $this->service ) )->register();
 		}
 
-		$receipt = new Receipt( $this->service, $guard, $clock );
-		$receipt->register();
+		if ( ! $is_cli ) {
+			( new Admin\AdminBar( $this->service, $guard ) )->register();
+		}
 
 		// Optional pauses of visitor comments and form submissions; both are
 		// off unless the site turned them on, and neither reads the freeze

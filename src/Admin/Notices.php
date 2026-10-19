@@ -61,7 +61,7 @@ final class Notices {
 
 		$can_bypass = current_user_can( 'deployment_guard_bypass' );
 
-		if ( ! $can_bypass && ! $this->user_could_be_affected() ) {
+		if ( ! $can_bypass && ! $this->guard->could_be_affected() ) {
 			return;
 		}
 
@@ -132,25 +132,6 @@ final class Notices {
 		}
 
 		return in_array( $screen->id, array( 'appearance_page_custom-header', 'appearance_page_custom-background' ), true );
-	}
-
-	/**
-	 * Whether the current user natively holds any of the primitive
-	 * capabilities a freeze can restrict — not only `edit_posts`, which
-	 * misses a theme-options-only, upload-only, or taxonomy-only role
-	 * (each a real way to reach *some* protected surface; see
-	 * `Guard::applies()`). This is deliberately broader than any single
-	 * request's actual target: it decides whether to show the notice at
-	 * all, not whether a specific action is blocked.
-	 */
-	private function user_could_be_affected(): bool {
-		foreach ( array( 'edit_posts', 'upload_files', 'edit_theme_options', 'edit_terms', 'assign_terms' ) as $cap ) {
-			if ( current_user_can( $cap ) ) {
-				return true;
-			}
-		}
-
-		return false;
 	}
 
 	/**
