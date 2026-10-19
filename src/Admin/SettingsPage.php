@@ -285,7 +285,7 @@ final class SettingsPage {
 		$timezone   = wp_timezone();
 
 		echo '<div class="wrap stillgate">';
-		echo '<h1 class="wp-heading-inline">' . esc_html__( 'Stillgate', 'stillgate' ) . '</h1>';
+		echo '<h1 class="wp-heading-inline"><svg class="sg-mark" viewBox="0 0 128 192" width="18" height="27" aria-hidden="true" focusable="false"><path fill="currentColor" d="M128 0H56A56 56 0 0 0 45.23 110.95A24 24 0 0 1 47.6 78.48A24 24 0 0 1 56 32H128ZM0 192H72A56 56 0 0 0 82.77 81.05A24 24 0 0 1 80.4 113.52A24 24 0 0 1 72 160H0Z"/><circle cx="64" cy="96" r="16" fill="#d06f00"/></svg>' . esc_html__( 'Stillgate', 'stillgate' ) . '</h1>';
 		echo '<span class="sg-tagline">' . esc_html__( 'Editorial freeze for deployments', 'stillgate' ) . '</span>';
 		echo '<hr class="wp-header-end" />';
 

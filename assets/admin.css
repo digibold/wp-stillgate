@@ -364,3 +364,9 @@
 .stillgate .sg-save-note {
 	margin: 8px 0 0;
 }
+
+.stillgate .sg-mark {
+	margin-inline-end: 10px;
+	color: #0a2530;
+	vertical-align: -4px;
+}
