@@ -98,8 +98,9 @@ command that ends it.
 Outputs, readable by later steps of the same job: `frozen` (`true` when this
 Action started a freeze) and `ends-at`. The verdict of the receipt is not an
 output: the step that reads it runs after the last step of the job, and the
-runner does not pass on what such a step writes. It is in the job summary and
-in the result of the job.
+runner does not pass on what such a step writes (checked on a GitHub runner:
+the job output stays empty). It is in the job summary and in the result of the
+job.
 
 ## Things to know
 
@@ -157,4 +158,6 @@ SSH, as in [the WP-CLI reference](../wp-cli.md#deploy-script-recipe):
 does, against a mock site. `tests/e2e/action.sh` runs them against a real
 WordPress site with the plugin installed, including the failure cases, and
 `.github/workflows/action-selftest.yml` runs the Action on a GitHub runner
-against a throwaway site in this repository's CI.
+against a throwaway site in this repository's CI: it freezes the site, checks
+that the freeze is on and that a restricted action is refused, and a second job
+confirms that the post step ran and finished successfully.
