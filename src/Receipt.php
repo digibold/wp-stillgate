@@ -494,7 +494,7 @@ final class Receipt {
 
 		$where = "post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft' AND {$changed}";
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- a read-only, one-off report that must see the live table; the dynamic part is only the list of placeholders built above, and every value is passed to prepare().
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, PluginCheck.Security.DirectDB.UnescapedDBParameter -- a read-only, one-off report that must see the live table; the dynamic part is only the list of placeholders built above, and every value is passed to prepare().
 		$count = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE {$where}", $args ) );
 		$ids   = $wpdb->get_col(
 			$wpdb->prepare(
@@ -575,7 +575,7 @@ final class Receipt {
 			$where = "post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft' AND post_date_gmt >= %s{$upper}";
 		}
 
-		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- read-only one-off report; see changed_posts().
+		// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, PluginCheck.Security.DirectDB.UnescapedDBParameter -- read-only one-off report; see changed_posts().
 		$created = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE {$where}", $args ) );
 
 		return max( 0, (int) ( $baseline['posts'] ?? 0 ) + $created - (int) ( $current['posts'] ?? 0 ) );
@@ -600,7 +600,7 @@ final class Receipt {
 			$args[] = gmdate( 'Y-m-d H:i:s', $until );
 		}
 
-		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- read-only one-off report; only a fixed optional clause is interpolated, and every value goes through prepare().
+		// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, PluginCheck.Security.DirectDB.UnescapedDBParameter -- read-only one-off report; only a fixed optional clause is interpolated, and every value goes through prepare().
 		return (int) $wpdb->get_var(
 			$wpdb->prepare(
 				"SELECT COUNT(*) FROM {$wpdb->comments} WHERE comment_type IN ( 'comment', 'review', 'pingback', 'trackback' ) AND comment_approved NOT IN ( 'spam', 'trash' ) AND comment_date_gmt >= %s{$upper}",
@@ -627,14 +627,14 @@ final class Receipt {
 		if ( $post_types ) {
 			$placeholders = implode( ', ', array_fill( 0, count( $post_types ), '%s' ) );
 
-			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- read-only one-off snapshot; the interpolated part is only a list of %s placeholders and every value goes through prepare().
+			// phpcs:ignore WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, PluginCheck.Security.DirectDB.UnescapedDBParameter -- read-only one-off snapshot; the interpolated part is only a list of %s placeholders and every value goes through prepare().
 			$post_total = (int) $wpdb->get_var( $wpdb->prepare( "SELECT COUNT(*) FROM {$wpdb->posts} WHERE post_type IN ( {$placeholders} ) AND post_status <> 'auto-draft'", $post_types ) );
 		}
 
 		if ( $types['taxonomies'] ) {
 			$placeholders = implode( ', ', array_fill( 0, count( $types['taxonomies'] ), '%s' ) );
 
-			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare -- read-only one-off snapshot; see above.
+			// phpcs:disable WordPress.DB.DirectDatabaseQuery.DirectQuery, WordPress.DB.DirectDatabaseQuery.NoCaching, WordPress.DB.PreparedSQL.InterpolatedNotPrepared, WordPress.DB.PreparedSQLPlaceholders.UnfinishedPrepare, PluginCheck.Security.DirectDB.UnescapedDBParameter -- read-only one-off snapshot; see above.
 			$row = $wpdb->get_row(
 				$wpdb->prepare(
 					"SELECT COUNT(*) AS n, COALESCE( BIT_XOR( CRC32( CONCAT_WS( '|', t.term_id, tt.taxonomy, tt.parent, t.name, t.slug ) ) ), 0 ) AS x FROM {$wpdb->terms} t INNER JOIN {$wpdb->term_taxonomy} tt ON tt.term_id = t.term_id WHERE tt.taxonomy IN ( {$placeholders} )",

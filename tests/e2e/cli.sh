@@ -334,6 +334,73 @@ expect_exit 0 'wp stillgate disable' wp stillgate disable
 expect_exit 0 'wp cron event run publish_future_post' wp cron event run publish_future_post
 expect_eq 'scheduled post published once the freeze ended' "$(wp post get "$FUTURE_POST_ID" --field=post_status)" 'publish'
 
+log 'Pausing visitor comments and forms, the receipt and the REST API (real HTTP)'
+ADMIN_APP_PASSWORD=$(wp user application-password create admin dg-e2e-admin --porcelain)
+
+# admin_rest METHOD ROUTE [curl args...] — as the administrator, via an application password.
+admin_rest() {
+	local method="$1" route="$2"
+	shift 2
+	curl -s -o "$WORK_DIR/body" -w '%{http_code}' -u "admin:$ADMIN_APP_PASSWORD" -X "$method" "$@" "$SITE_URL/?rest_route=$route" || true
+}
+
+# visitor_comment — an anonymous comment on the fixture post; prints the status code.
+visitor_comment() {
+	curl -s -o "$WORK_DIR/body" -w '%{http_code}' \
+		--data-urlencode "comment_post_ID=$POST_ID" --data-urlencode 'author=Visitor' \
+		--data-urlencode 'email=visitor@example.test' --data-urlencode 'comment=Hello there' \
+		--data-urlencode 'comment_parent=0' "$SITE_URL/wp-comments-post.php" || true
+}
+
+# receipt_field PATH — a value from `wp stillgate receipt --format=json`, e.g. paused.comments.
+receipt_field() {
+	wp stillgate receipt --format=json | php -r '$d = json_decode( stream_get_contents( STDIN ), true ); foreach ( explode( ".", $argv[1] ) as $k ) { $d = $d[ $k ] ?? null; } echo is_array( $d ) ? implode( ",", $d ) : ( is_bool( $d ) ? ( $d ? "true" : "false" ) : (string) $d );' "$1"
+}
+
+# The earlier steps changed posts a moment ago; a change in the very second a
+# freeze begins counts as made during it, so let the clock move on first.
+sleep 2
+# The scheduled fixtures were published early above, so WordPress stamped them
+# with the future date they were scheduled for; that is not a change made
+# during the freeze that is about to start.
+wp db query "UPDATE ${DB_PREFIX}posts SET post_modified_gmt = DATE_SUB( UTC_TIMESTAMP(), INTERVAL 1 HOUR ) WHERE post_modified_gmt > UTC_TIMESTAMP()"
+expect_exit 0 'wp stillgate scope --comments=on --forms=on' wp stillgate scope --comments=on --forms=on
+expect_exit 0 'wp stillgate enable --for=30m' wp stillgate enable --for=30m
+COMMENTS_BEFORE=$(wp comment list --post_id="$POST_ID" --format=count)
+
+expect_eq 'a visitor comment is refused with 423 while comments are paused' "$(visitor_comment)" '423'
+expect_eq 'the refusal carries the visitor message' "$(body_contains 'temporarily paused')" 'yes'
+expect_eq 'no comment was stored' "$(wp comment list --post_id="$POST_ID" --format=count)" "$COMMENTS_BEFORE"
+
+expect_eq 'a Contact Form 7 style post is refused with 423' "$(curl -s -o "$WORK_DIR/body" -w '%{http_code}' --data-urlencode '_wpcf7=1' --data-urlencode 'your-name=Visitor' "$SITE_URL/" || true)" '423'
+expect_eq 'the same body sent to a REST-looking URL is refused too' "$(curl -s -o "$WORK_DIR/body" -w '%{http_code}' --data-urlencode '_wpcf7=1' "$SITE_URL/wp-json/anything/at/all" || true)" '423'
+expect_eq 'an admin-ajax form submission is refused' "$(curl -s -o "$WORK_DIR/body" -w '%{http_code}' --data-urlencode 'action=wpforms_submit' "$SITE_URL/wp-admin/admin-ajax.php" || true)" '200'
+expect_eq 'the admin-ajax refusal carries the visitor message' "$(body_contains 'temporarily paused')" 'yes'
+expect_eq 'a Contact Form 7 REST route in any letter case is refused' "$(curl -s -o "$WORK_DIR/body" -w '%{http_code}' -X POST --data-urlencode '_wpcf7_unit_tag=wpcf7-f1-p2-o1' "$SITE_URL/?rest_route=/Contact-Form-7/V1/Contact-Forms/1/FEEDBACK" || true)" '200'
+expect_eq '... and is answered as aborted, not processed' "$(body_contains '"status":"aborted"')" 'yes'
+
+expect_eq 'REST API: the status is readable by an administrator' "$(admin_rest GET /stillgate/v1/status)" '200'
+expect_eq 'REST API: it reports the freeze as active' "$(json_field active)" '1'
+expect_eq 'REST API: an editor is refused' "$(rest GET /stillgate/v1/status)" '403'
+expect_eq 'REST API: a freeze with an empty duration is refused' "$(admin_rest POST /stillgate/v1/freeze -d 'for=')" '400'
+expect_eq 'REST API: the refusal is invalid_duration' "$(json_field code)" 'invalid_duration'
+expect_eq 'REST API: extending a timed freeze succeeds' "$(admin_rest POST /stillgate/v1/freeze/extend -d 'by=15m')" '200'
+expect_eq 'REST API: the receipt is readable' "$(admin_rest GET /stillgate/v1/receipt)" '200'
+
+expect_eq 'receipt: one visitor comment was paused' "$(receipt_field paused.comments)" '1'
+expect_eq 'receipt: four form submissions were paused' "$(receipt_field paused.forms)" '4'
+expect_eq 'receipt: nothing in the content changed' "$(receipt_field clean)" 'true'
+expect_exit 0 'wp stillgate receipt --check passes for a clean receipt' wp stillgate receipt --check
+
+wp post update "$POST_ID" --post_title="Changed during the pause" --user=admin >/dev/null
+expect_eq 'receipt: a change by a bypass user is listed' "$(receipt_field content.changed_ids)" "$POST_ID"
+expect_exit 1 'wp stillgate receipt --check fails once something changed' wp stillgate receipt --check
+
+expect_exit 0 'wp stillgate disable' wp stillgate disable
+expect_eq 'a visitor comment is accepted again once the freeze has ended' "$(visitor_comment)" '302'
+expect_eq 'the receipt keeps what happened while the freeze was on' "$(receipt_field paused.comments)" '1'
+expect_exit 0 'wp stillgate scope --comments=off --forms=off' wp stillgate scope --comments=off --forms=off
+
 log 'wp stillgate schedule and clear'
 START=$(date -u '+%Y-%m-%dT%H:%M:%S')
 END=$(date -u -d '+1 hour' '+%Y-%m-%dT%H:%M:%S' 2>/dev/null || date -u -v+1H '+%Y-%m-%dT%H:%M:%S')
@@ -352,6 +419,10 @@ wp plugin deactivate stillgate
 expect_exit 0 'wp plugin uninstall' wp plugin uninstall stillgate --skip-delete
 expect_eq 'freeze state option removed' "$(wp option get deployment_guard_state >/dev/null 2>&1 && echo present || echo missing)" 'missing'
 expect_eq 'activity history option removed' "$(wp option get deployment_guard_history >/dev/null 2>&1 && echo present || echo missing)" 'missing'
+expect_eq 'coverage option removed' "$(wp option get deployment_guard_scope >/dev/null 2>&1 && echo present || echo missing)" 'missing'
+expect_eq 'receipt option removed' "$(wp option get deployment_guard_receipt >/dev/null 2>&1 && echo present || echo missing)" 'missing'
+expect_eq 'comment counter option removed' "$(wp option get deployment_guard_paused_comments >/dev/null 2>&1 && echo present || echo missing)" 'missing'
+expect_eq 'form counter option removed' "$(wp option get deployment_guard_paused_forms >/dev/null 2>&1 && echo present || echo missing)" 'missing'
 expect_eq 'bypass capability removed from administrator' "$(wp cap list administrator | grep -c '^deployment_guard_bypass$' || true)" '0'
 
 if [ "$FAIL" -gt 0 ] && [ -s "$WORK_DIR/server.log" ]; then
