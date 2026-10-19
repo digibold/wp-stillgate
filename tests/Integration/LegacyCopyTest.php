@@ -216,6 +216,18 @@ final class LegacyCopyTest extends TestCase {
 		return ob_get_clean();
 	}
 
+	/**
+	 * Managing plugins is a Super Admin power on a network, so the notice
+	 * is only shown to one there.
+	 */
+	private function login_as_plugin_manager(): void {
+		$this->login_as( 'administrator' );
+
+		if ( is_multisite() ) {
+			grant_super_admin( get_current_user_id() );
+		}
+	}
+
 	private function go_to_screen( string $screen_id ): void {
 		require_once ABSPATH . 'wp-admin/includes/class-wp-screen.php';
 		require_once ABSPATH . 'wp-admin/includes/screen.php';
@@ -225,7 +237,7 @@ final class LegacyCopyTest extends TestCase {
 
 	public function test_notice_appears_on_the_plugins_screen_while_the_earlier_copy_is_active(): void {
 		update_option( 'active_plugins', array( self::LEGACY ) );
-		$this->login_as( 'administrator' );
+		$this->login_as_plugin_manager();
 		$this->go_to_screen( 'plugins' );
 
 		$html = $this->render_notice( new LegacyCopy() );
@@ -236,7 +248,7 @@ final class LegacyCopyTest extends TestCase {
 	}
 
 	public function test_passive_copy_notice_says_it_has_not_started(): void {
-		$this->login_as( 'administrator' );
+		$this->login_as_plugin_manager();
 		$this->go_to_screen( 'plugins' );
 
 		$html = $this->render_notice( new LegacyCopy( true ) );

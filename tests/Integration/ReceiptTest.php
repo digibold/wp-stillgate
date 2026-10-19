@@ -55,6 +55,16 @@ final class ReceiptTest extends TestCase {
 		);
 	}
 
+	/**
+	 * Ends the freeze at the real current time. The test clock is pinned at
+	 * the start of the test, so an edit that lands in the next second would
+	 * otherwise fall after the receipt's end and not be blamed on the freeze.
+	 */
+	private function end_freeze_now(): void {
+		$this->clock['now'] = max( $this->clock['now'], time() );
+		$this->service->disable();
+	}
+
 	public function test_there_is_no_receipt_before_any_freeze(): void {
 		$this->assertSame( 'none', $this->receipt->report()['state'] );
 		$this->assertSame( array(), $this->receipt->changed_ids() );
@@ -212,7 +222,7 @@ final class ReceiptTest extends TestCase {
 		$post = $this->old_post();
 
 		$this->service->enable();
-		$this->service->disable();
+		$this->end_freeze_now();
 		$closed_at = $this->receipt->report()['closed_at'];
 
 		// Editing resumes: the receipt is closed at its end time.
@@ -232,7 +242,7 @@ final class ReceiptTest extends TestCase {
 
 		$this->service->enable();
 		wp_update_post( array( 'ID' => $post, 'post_title' => 'Changed during' ) );
-		$this->service->disable();
+		$this->end_freeze_now();
 
 		$this->clock['now'] += 5;
 		sleep( 2 );
@@ -254,7 +264,7 @@ final class ReceiptTest extends TestCase {
 
 		$this->service->enable();
 		$comment = self::factory()->comment->create( array( 'comment_post_ID' => $post, 'comment_approved' => '1' ) );
-		$this->service->disable();
+		$this->end_freeze_now();
 
 		wp_delete_comment( $comment, true );
 
@@ -301,7 +311,7 @@ final class ReceiptTest extends TestCase {
 
 		$this->service->enable();
 		wp_update_post( array( 'ID' => $post, 'post_title' => 'Edited during the later freeze' ) );
-		$this->service->disable();
+		$this->end_freeze_now();
 
 		$report = $this->receipt->report();
 
@@ -453,7 +463,7 @@ final class ReceiptTest extends TestCase {
 
 		$this->service->enable();
 		wp_update_post( array( 'ID' => $post, 'post_title' => 'Changed' ) );
-		$this->service->disable();
+		$this->end_freeze_now();
 		$this->assertFalse( $this->receipt->report()['clean'] );
 
 		$this->clock['now'] += 10;
