@@ -131,4 +131,146 @@ final class FreezeServiceTest extends TestCase {
 		$this->assertFalse( $seen[0][1]['enabled'] );
 		$this->assertSame( 'ui', $seen[0][2] );
 	}
+	public function test_freeze_for_starts_a_freeze_that_ends_by_itself(): void {
+		$service = $this->make_service( self::NOW );
+
+		$this->assertSame( 'timed', $service->freeze_for( 1800 ) );
+		$this->assertTrue( $service->is_active() );
+		$this->assertSame( self::NOW + 1800, $service->ends_at() );
+		$this->assertFalse( $service->config()->enabled );
+
+		// The same stored state, read a moment after the window closes.
+		$later = $this->make_service( self::NOW + 1800 );
+		$this->assertFalse( $later->is_active() );
+		$this->assertSame( self::NOW + 1800, $this->make_service( self::NOW + 1799 )->ends_at(), 'still running one second before the end' );
+	}
+
+	public function test_freeze_for_replaces_a_manual_freeze_and_an_existing_schedule(): void {
+		$service = $this->make_service( self::NOW );
+		$service->enable();
+		$service->schedule( self::NOW + 5000, self::NOW + 6000 );
+
+		$this->assertSame( 'timed', $service->freeze_for( 600 ) );
+
+		$config = $service->config();
+		$this->assertFalse( $config->enabled, 'the manual switch is replaced by the timer' );
+		$this->assertSame( self::NOW, $config->schedule_start );
+		$this->assertSame( self::NOW + 600, $config->schedule_end );
+	}
+
+	public function test_freeze_for_logs_a_schedule_entry_and_fires_the_state_changed_action(): void {
+		$service = $this->make_service( self::NOW );
+		$seen    = array();
+		add_action(
+			'deployment_guard_state_changed',
+			static function ( $new, $old, $source ) use ( &$seen ) {
+				$seen[] = array( $new['enabled'], $source );
+			},
+			10,
+			3
+		);
+
+		$service->freeze_for( 600, 'rest' );
+
+		$this->assertSame( array( array( false, 'rest' ) ), $seen );
+		$entries = $service->entries();
+		$this->assertSame( 'schedule_set', $entries[0]['type'] );
+		$this->assertSame( 'rest', $entries[0]['ctx']['source'] );
+	}
+
+	/**
+	 * @dataProvider provide_bad_timer_durations
+	 */
+	public function test_freeze_for_rejects_bad_durations( int $seconds, string $expected_code ): void {
+		$service = $this->make_service( self::NOW );
+
+		$result = $service->freeze_for( $seconds );
+
+		$this->assertWPError( $result );
+		$this->assertSame( $expected_code, $result->get_error_code() );
+		$this->assertFalse( $service->is_active() );
+	}
+
+	public static function provide_bad_timer_durations(): array {
+		return array(
+			'shorter than a minute' => array( 59, 'duration_too_short' ),
+			'zero'                  => array( 0, 'duration_too_short' ),
+			'negative'              => array( -5, 'duration_too_short' ),
+			'longer than a window'  => array( 7 * DAY_IN_SECONDS + 1, 'window_too_long' ),
+		);
+	}
+
+	public function test_freeze_for_accepts_exactly_the_longest_window(): void {
+		$service = $this->make_service( self::NOW );
+
+		$this->assertSame( 'timed', $service->freeze_for( 7 * DAY_IN_SECONDS ) );
+	}
+
+	public function test_extend_pushes_the_end_of_a_running_window_back(): void {
+		$service = $this->make_service( self::NOW );
+		$service->freeze_for( 600 );
+
+		$this->assertSame( 'extended', $service->extend( 900 ) );
+		$this->assertSame( self::NOW + 1500, $service->ends_at() );
+		$this->assertSame( self::NOW, $service->config()->schedule_start );
+	}
+
+	public function test_extend_works_on_a_scheduled_window_that_is_running(): void {
+		$service = $this->make_service( self::NOW );
+		$service->schedule( self::NOW - 100, self::NOW + 100 );
+
+		$this->assertSame( 'extended', $service->extend( 3600 ) );
+		$this->assertSame( self::NOW + 3700, $service->ends_at() );
+	}
+
+	/**
+	 * @dataProvider provide_states_that_cannot_be_extended
+	 */
+	public function test_extend_refuses_when_there_is_no_running_window( string $state ): void {
+		$service = $this->make_service( self::NOW );
+
+		if ( 'manual' === $state ) {
+			$service->enable();
+		} elseif ( 'upcoming' === $state ) {
+			$service->schedule( self::NOW + 1000, self::NOW + 2000 );
+		} elseif ( 'expired' === $state ) {
+			$service->schedule( self::NOW - 2000, self::NOW + 10 );
+			$service = $this->make_service( self::NOW + 500 );
+		}
+
+		$result = $service->extend( 600 );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'not_extendable', $result->get_error_code() );
+	}
+
+	public static function provide_states_that_cannot_be_extended(): array {
+		return array(
+			'nothing configured' => array( 'none' ),
+			'manual freeze'      => array( 'manual' ),
+			'upcoming window'    => array( 'upcoming' ),
+			'expired window'     => array( 'expired' ),
+		);
+	}
+
+	public function test_extend_cannot_stretch_a_window_past_the_maximum(): void {
+		$service = $this->make_service( self::NOW );
+		$service->freeze_for( 6 * DAY_IN_SECONDS );
+
+		$result = $service->extend( 2 * DAY_IN_SECONDS );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'window_too_long', $result->get_error_code() );
+		$this->assertSame( self::NOW + 6 * DAY_IN_SECONDS, $service->ends_at(), 'the window is unchanged after a refused extension' );
+	}
+
+	public function test_extend_rejects_a_duration_shorter_than_a_minute(): void {
+		$service = $this->make_service( self::NOW );
+		$service->freeze_for( 600 );
+
+		$result = $service->extend( 30 );
+
+		$this->assertWPError( $result );
+		$this->assertSame( 'duration_too_short', $result->get_error_code() );
+	}
 }

@@ -141,6 +141,55 @@ final class DateInput {
 	}
 
 	/**
+	 * Parse a short duration such as "30m", "2h", "1d", "1h30m" or "90s"
+	 * into seconds. A bare integer means minutes. Units are s, m, h and d
+	 * (also "min", "hour", "day" and their plurals), written without
+	 * relative phrases, signs or decimals, so scripts get one unambiguous
+	 * spelling.
+	 *
+	 * @param string $value Raw input.
+	 * @return int Seconds, always greater than zero.
+	 *
+	 * @throws \DomainException With message `invalid_duration`.
+	 */
+	public static function parse_duration( string $value ): int {
+		$value = strtolower( trim( $value ) );
+
+		if ( 1 === preg_match( '/^\d+$/', $value ) ) {
+			$value .= 'm';
+		}
+
+		if ( '' === $value || 1 !== preg_match( '/^(?:\d+\s*(?:seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)\s*)+$/', $value ) ) {
+			throw new \DomainException( 'invalid_duration' );
+		}
+
+		preg_match_all( '/(\d+)\s*(seconds?|secs?|s|minutes?|mins?|m|hours?|hrs?|h|days?|d)/', $value, $parts, PREG_SET_ORDER );
+
+		$seconds = 0;
+
+		foreach ( $parts as $part ) {
+			$number = (int) $part[1];
+			$unit   = $part[2][0];
+
+			if ( 'd' === $unit ) {
+				$seconds += $number * 86400;
+			} elseif ( 'h' === $unit ) {
+				$seconds += $number * 3600;
+			} elseif ( 'm' === $unit ) {
+				$seconds += $number * 60;
+			} else {
+				$seconds += $number;
+			}
+		}
+
+		if ( $seconds <= 0 ) {
+			throw new \DomainException( 'invalid_duration' );
+		}
+
+		return $seconds;
+	}
+
+	/**
 	 * Format a UTC timestamp as a value suitable for an HTML
 	 * `datetime-local` input, in the given timezone.
 	 */

@@ -21,6 +21,11 @@ final class FreezeService {
 	public const OPTION_STATE   = 'deployment_guard_state';
 	public const OPTION_HISTORY = 'deployment_guard_history';
 
+	/**
+	 * Shortest freeze the timed actions will start or extend by.
+	 */
+	public const MIN_TIMED_FREEZE_SECONDS = 60;
+
 	private \Closure $clock;
 
 	private Suspension $suspension;
@@ -208,6 +213,98 @@ final class FreezeService {
 		return 'scheduled';
 	}
 
+	/**
+	 * Start a freeze now that ends by itself after $seconds: a scheduled
+	 * window that begins immediately, so a deployment that crashes can
+	 * never leave editing locked indefinitely. It replaces both the manual
+	 * switch and any scheduled window, since there is a single freeze at a
+	 * time.
+	 *
+	 * @return string|\WP_Error 'timed' on success, or a WP_Error with code
+	 *                          `duration_too_short` or one of
+	 *                          FreezeConfig::validate_schedule()'s codes.
+	 */
+	public function freeze_for( int $seconds, string $source = 'ui' ): string|\WP_Error {
+		Installer::maybe_install();
+
+		if ( $seconds < self::MIN_TIMED_FREEZE_SECONDS ) {
+			return new \WP_Error( 'duration_too_short', self::error_text( 'duration_too_short' ) );
+		}
+
+		$now   = $this->now();
+		$end   = $now + $seconds;
+		$error = FreezeConfig::validate_schedule( $now, $end, $now );
+
+		if ( null !== $error ) {
+			return new \WP_Error( $error, self::error_text( $error ) );
+		}
+
+		$old = $this->config();
+		$new = $old
+			->with_enabled( false, $now, get_current_user_id() )
+			->with_schedule( $now, $end, $now, get_current_user_id() );
+
+		$this->save( $new );
+		$this->log(
+			'schedule_set',
+			array(
+				'source' => $source,
+				'start'  => $now,
+				'end'    => $end,
+			)
+		);
+		$this->dispatch_state_changed( $new, $old, $source );
+
+		return 'timed';
+	}
+
+	/**
+	 * Push the end of the running scheduled freeze back by $seconds, for
+	 * a deployment that is taking longer than planned.
+	 *
+	 * @return string|\WP_Error 'extended' on success, or a WP_Error with
+	 *                          code `not_extendable` (no running scheduled
+	 *                          window) or one of
+	 *                          FreezeConfig::validate_schedule()'s codes.
+	 */
+	public function extend( int $seconds, string $source = 'ui' ): string|\WP_Error {
+		Installer::maybe_install();
+
+		if ( $seconds < self::MIN_TIMED_FREEZE_SECONDS ) {
+			return new \WP_Error( 'duration_too_short', self::error_text( 'duration_too_short' ) );
+		}
+
+		$now = $this->now();
+		$old = $this->config();
+
+		if ( 'active' !== $old->schedule_status( $now ) || null === $old->schedule_start || null === $old->schedule_end ) {
+			return new \WP_Error( 'not_extendable', self::error_text( 'not_extendable' ) );
+		}
+
+		$start = $old->schedule_start;
+		$end   = $old->schedule_end + $seconds;
+		$error = FreezeConfig::validate_schedule( $start, $end, $now );
+
+		if ( null !== $error ) {
+			return new \WP_Error( $error, self::error_text( $error ) );
+		}
+
+		$new = $old->with_schedule( $start, $end, $now, get_current_user_id() );
+
+		$this->save( $new );
+		$this->log(
+			'schedule_set',
+			array(
+				'source' => $source,
+				'start'  => $start,
+				'end'    => $end,
+			)
+		);
+		$this->dispatch_state_changed( $new, $old, $source );
+
+		return 'extended';
+	}
+
 	public function clear_schedule( string $source = 'ui' ): string {
 		Installer::maybe_install();
 
@@ -312,6 +409,12 @@ final class FreezeService {
 				);
 			case 'confirmation_required':
 				return __( 'Please check the confirmation box to continue.', 'stillgate' );
+			case 'invalid_duration':
+				return __( 'That duration could not be understood. Use a value such as 30m, 2h, 1d or 1h30m.', 'stillgate' );
+			case 'duration_too_short':
+				return __( 'A timed freeze must last at least one minute.', 'stillgate' );
+			case 'not_extendable':
+				return __( 'There is no running timed or scheduled freeze to extend. A manual freeze has no end time; use a timer or schedule instead.', 'stillgate' );
 			default:
 				return __( 'The request could not be completed.', 'stillgate' );
 		}
@@ -339,7 +442,7 @@ final class FreezeService {
 				 *
 				 * @param array  $new    The new state (FreezeConfig::to_array()).
 				 * @param array  $old    The previous state.
-				 * @param string $source One of: ui, cli, deactivation.
+				 * @param string $source One of: ui, cli, rest, deactivation.
 				 */
 				do_action( 'deployment_guard_state_changed', $new_config->to_array(), $old_config->to_array(), $source );
 			}

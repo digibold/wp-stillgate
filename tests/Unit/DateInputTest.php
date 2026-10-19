@@ -163,4 +163,55 @@ final class DateInputTest extends TestCase {
 
 		$this->assertSame( $original, DateInput::to_input_value( $timestamp, $this->riga() ) );
 	}
+	/**
+	 * @dataProvider provide_valid_durations
+	 */
+	public function test_parse_duration_accepts_valid_forms( string $value, int $expected_seconds ): void {
+		$this->assertSame( $expected_seconds, DateInput::parse_duration( $value ) );
+	}
+
+	public static function provide_valid_durations(): array {
+		return array(
+			'minutes'                      => array( '30m', 1800 ),
+			'minutes, long unit'           => array( '30 minutes', 1800 ),
+			'minutes, mid unit'            => array( '5min', 300 ),
+			'hours'                        => array( '2h', 7200 ),
+			'hours, long unit'             => array( '1 hour', 3600 ),
+			'days'                         => array( '1d', 86400 ),
+			'seconds'                      => array( '90s', 90 ),
+			'combined'                     => array( '1h30m', 5400 ),
+			'combined with spaces'         => array( '1h 30m', 5400 ),
+			'combined days and hours'      => array( '1d12h', 129600 ),
+			'upper case'                   => array( '45M', 2700 ),
+			'bare number means minutes'    => array( '45', 2700 ),
+			'surrounding whitespace'       => array( '  15m ', 900 ),
+		);
+	}
+
+	/**
+	 * @dataProvider provide_invalid_durations
+	 */
+	public function test_parse_duration_rejects_invalid_forms( string $value ): void {
+		$this->expectException( \DomainException::class );
+		$this->expectExceptionMessage( 'invalid_duration' );
+
+		DateInput::parse_duration( $value );
+	}
+
+	public static function provide_invalid_durations(): array {
+		return array(
+			'empty'               => array( '' ),
+			'whitespace'          => array( '   ' ),
+			'zero'                => array( '0' ),
+			'zero with unit'      => array( '0m' ),
+			'negative'            => array( '-5m' ),
+			'decimal'             => array( '1.5h' ),
+			'unit only'           => array( 'm' ),
+			'word'                => array( 'soon' ),
+			'relative phrase'     => array( 'in 2 hours' ),
+			'trailing garbage'    => array( '30m later' ),
+			'unknown unit'        => array( '3w' ),
+			'iso 8601 duration'   => array( 'PT30M' ),
+		);
+	}
 }

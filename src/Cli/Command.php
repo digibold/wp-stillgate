@@ -76,7 +76,16 @@ final class Command {
 	/**
 	 * Turns the freeze on immediately.
 	 *
+	 * Without --for the freeze stays on until it is turned off. With --for
+	 * it ends by itself after the given time, so a deployment that fails
+	 * halfway can never leave editing locked indefinitely.
+	 *
 	 * ## OPTIONS
+	 *
+	 * [--for=<duration>]
+	 * : End the freeze automatically after this long, for example 30m, 2h,
+	 * 1d or 1h30m (a bare number means minutes). At least one minute and
+	 * at most seven days. Replaces any manual freeze or scheduled window.
 	 *
 	 * [--message=<message>]
 	 * : Sets the message shown to restricted users.
@@ -84,7 +93,8 @@ final class Command {
 	 * ## EXAMPLES
 	 *
 	 *     wp stillgate enable
-	 *     wp stillgate enable --message="Deploying now, back in 10 minutes."
+	 *     wp stillgate enable --for=30m
+	 *     wp stillgate enable --for=2h --message="Deploying now, back in two hours."
 	 *
 	 * @param string[]             $args
 	 * @param array<string, mixed> $assoc_args
@@ -92,9 +102,13 @@ final class Command {
 	public function enable( $args, $assoc_args ): void {
 		$this->suspension->run(
 			function () use ( $assoc_args ): void {
-				$result = $this->service->enable( 'cli' );
+				if ( isset( $assoc_args['for'] ) ) {
+					$this->do_timed_freeze( (string) $assoc_args['for'] );
+				} else {
+					$result = $this->service->enable( 'cli' );
 
-				\WP_CLI::success( 'unchanged' === $result ? 'The freeze was already on.' : 'Stillgate is now active.' );
+					\WP_CLI::success( 'unchanged' === $result ? 'The freeze was already on.' : 'Stillgate is now active.' );
+				}
 
 				$this->maybe_set_message( $assoc_args );
 				$this->maybe_warn_forced();
@@ -103,6 +117,57 @@ final class Command {
 		);
 	}
 
+	/**
+	 * Pushes the end of the running timed or scheduled freeze back.
+	 *
+	 * For a deployment that is taking longer than planned. A manual freeze
+	 * has no end time to extend, and the total window cannot exceed seven
+	 * days.
+	 *
+	 * ## OPTIONS
+	 *
+	 * <duration>
+	 * : How much longer, for example 15m, 1h or 1h30m (a bare number means minutes).
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp stillgate extend 15m
+	 *
+	 * @param string[]             $args
+	 * @param array<string, mixed> $assoc_args
+	 */
+	public function extend( $args, $assoc_args ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- extend takes no options; both parameters are required by WP-CLI's command method signature.
+		$this->suspension->run(
+			function () use ( $args ): void {
+				try {
+					$seconds = DateInput::parse_duration( isset( $args[0] ) ? (string) $args[0] : '' );
+				} catch ( \DomainException $exception ) {
+					$this->fail( 'Invalid duration: ' . FreezeService::error_text( $exception->getMessage() ) );
+
+					return;
+				}
+
+				$result = $this->service->extend( $seconds, 'cli' );
+
+				if ( is_wp_error( $result ) ) {
+					$this->fail( $result->get_error_message() );
+
+					return;
+				}
+
+				$ends_at = $this->service->ends_at();
+
+				\WP_CLI::success(
+					null !== $ends_at
+						? sprintf( 'The freeze now ends at %s (UTC).', gmdate( 'c', $ends_at ) )
+						: 'The freeze was extended.'
+				);
+
+				$this->maybe_warn_forced();
+				$this->maybe_warn_object_cache();
+			}
+		);
+	}
 	/**
 	 * Turns the freeze off.
 	 *
@@ -224,6 +289,7 @@ final class Command {
 			'schedule_start_utc'      => null !== $config->schedule_start ? gmdate( 'c', $config->schedule_start ) : '',
 			'schedule_end'            => null !== $config->schedule_end ? DateInput::to_input_value( $config->schedule_end, $timezone ) : '',
 			'schedule_end_utc'        => null !== $config->schedule_end ? gmdate( 'c', $config->schedule_end ) : '',
+			'ends_at_utc'             => null !== $this->service->ends_at() ? gmdate( 'c', $this->service->ends_at() ) : '',
 			'timezone'                => wp_timezone_string(),
 			'message'                 => $config->message,
 			'updated_at_utc'          => $config->updated_at > 0 ? gmdate( 'c', $config->updated_at ) : '',
@@ -253,6 +319,32 @@ final class Command {
 		}
 	}
 
+	private function do_timed_freeze( string $duration_raw ): void {
+		try {
+			$seconds = DateInput::parse_duration( $duration_raw );
+		} catch ( \DomainException $exception ) {
+			$this->fail( 'Invalid --for: ' . FreezeService::error_text( $exception->getMessage() ) );
+
+			return;
+		}
+
+		$result = $this->service->freeze_for( $seconds, 'cli' );
+
+		if ( is_wp_error( $result ) ) {
+			$this->fail( $result->get_error_message() );
+
+			return;
+		}
+
+		$ends_at = $this->service->ends_at();
+
+		\WP_CLI::success(
+			sprintf(
+				'Stillgate is now active and ends by itself at %s (UTC).',
+				null !== $ends_at ? gmdate( 'c', $ends_at ) : gmdate( 'c', time() + $seconds )
+			)
+		);
+	}
 	private function do_clear_schedule(): void {
 		$result = $this->service->clear_schedule( 'cli' );
 

@@ -65,6 +65,7 @@ final class Plugin {
 		}
 
 		( new Enforcement\RestGate( $guard ) )->register();
+		( new Rest\Controller( $this->service ) )->register();
 		( new Enforcement\XmlRpcGate( $guard ) )->register();
 
 		if ( $is_cli ) {

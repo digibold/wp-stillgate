@@ -253,4 +253,98 @@ final class CliCommandTest extends TestCase {
 
 		$this->assertNotEmpty( \WP_CLI::messages_of( 'warning' ) );
 	}
+	public function test_enable_for_starts_a_timed_freeze(): void {
+		list( $command, $service ) = $this->install();
+
+		$command->enable( array(), array( 'for' => '30m' ) );
+
+		$this->assertTrue( $service->is_active() );
+		$this->assertFalse( $service->config()->enabled );
+		$ends_at = $service->ends_at();
+		$this->assertNotNull( $ends_at );
+		$this->assertEqualsWithDelta( time() + 1800, $ends_at, 5 );
+	}
+
+	public function test_enable_for_with_a_message(): void {
+		list( $command, $service ) = $this->install();
+
+		$command->enable( array(), array( 'for' => '2h', 'message' => 'Deploying.' ) );
+
+		$this->assertSame( 'Deploying.', $service->config()->message );
+		$this->assertEqualsWithDelta( time() + 7200, $service->ends_at(), 5 );
+	}
+
+	public function test_enable_for_with_an_invalid_duration_is_a_usage_error(): void {
+		list( $command, $service ) = $this->install();
+
+		try {
+			$command->enable( array(), array( 'for' => 'soon' ) );
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode() );
+			$this->assertStringContainsString( 'Invalid --for', $exit->getMessage() );
+		}
+
+		$this->assertFalse( $service->is_active() );
+	}
+
+	public function test_enable_for_beyond_the_maximum_is_refused(): void {
+		list( $command, $service ) = $this->install();
+
+		try {
+			$command->enable( array(), array( 'for' => '8d' ) );
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode() );
+		}
+
+		$this->assertFalse( $service->is_active() );
+	}
+
+	public function test_extend_pushes_the_end_back(): void {
+		list( $command, $service ) = $this->install();
+		$command->enable( array(), array( 'for' => '10m' ) );
+		$before = $service->ends_at();
+
+		$command->extend( array( '15m' ), array() );
+
+		$this->assertSame( $before + 900, $service->ends_at() );
+	}
+
+	public function test_extend_without_a_running_window_is_an_error(): void {
+		list( $command, $service ) = $this->install();
+		$service->enable();
+
+		try {
+			$command->extend( array( '15m' ), array() );
+			$this->fail( 'Expected a CLI error.' );
+		} catch ( CliExit $exit ) {
+			$this->assertSame( 1, $exit->getCode() );
+			$this->assertStringContainsString( 'no running timed or scheduled freeze', $exit->getMessage() );
+		}
+	}
+
+	public function test_extend_with_a_missing_or_bad_duration_is_a_usage_error(): void {
+		list( $command ) = $this->install();
+
+		foreach ( array( array(), array( 'later' ) ) as $args ) {
+			try {
+				$command->extend( $args, array() );
+				$this->fail( 'Expected a CLI error.' );
+			} catch ( CliExit $exit ) {
+				$this->assertStringContainsString( 'Invalid duration', $exit->getMessage() );
+			}
+		}
+	}
+
+	public function test_status_reports_when_the_freeze_ends(): void {
+		list( $command, $service ) = $this->install();
+		$service->freeze_for( 600 );
+
+		$command->status( array(), array( 'format' => 'json' ) );
+
+		$printed = \WP_CLI::messages_of( 'print_value' );
+		$this->assertNotSame( '', $printed[0][0]['ends_at_utc'] );
+		$this->assertNotFalse( strtotime( $printed[0][0]['ends_at_utc'] ) );
+	}
 }
