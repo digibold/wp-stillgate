@@ -74,13 +74,13 @@ final class Plugin {
 		( new Enforcement\FormGate( $guard, $receipt ) )->register();
 
 		( new Enforcement\RestGate( $guard ) )->register();
-		( new Rest\Controller( $this->service ) )->register();
+		( new Rest\Controller( $this->service, $receipt ) )->register();
 		( new Enforcement\XmlRpcGate( $guard ) )->register();
 
 		if ( $is_cli ) {
 			\WP_CLI::add_command(
 				'stillgate',
-				new Cli\Command( $this->service, $guard, $suspension ),
+				new Cli\Command( $this->service, $guard, $suspension, $receipt ),
 				array( 'shortdesc' => 'Manage the editorial deployment freeze.' )
 			);
 		}

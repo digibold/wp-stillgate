@@ -11,6 +11,8 @@ use Digibold\DeploymentGuard\DateInput;
 use Digibold\DeploymentGuard\FreezeService;
 use Digibold\DeploymentGuard\Guard;
 use Digibold\DeploymentGuard\Installer;
+use Digibold\DeploymentGuard\Receipt;
+use Digibold\DeploymentGuard\Scope;
 use Digibold\DeploymentGuard\Suspension;
 
 defined( 'ABSPATH' ) || exit;
@@ -36,10 +38,13 @@ final class Command {
 
 	private Suspension $suspension;
 
-	public function __construct( FreezeService $service, Guard $guard, Suspension $suspension ) {
+	private ?Receipt $receipt;
+
+	public function __construct( FreezeService $service, Guard $guard, Suspension $suspension, ?Receipt $receipt = null ) {
 		$this->service    = $service;
 		$this->guard      = $guard;
 		$this->suspension = $suspension;
+		$this->receipt    = $receipt;
 	}
 
 	/**
@@ -169,6 +174,169 @@ final class Command {
 		);
 	}
 	/**
+	 * Chooses what a freeze covers beyond editorial content.
+	 *
+	 * A freeze always locks editing. It can also pause comments and form
+	 * submissions from visitors, because anything saved to the database
+	 * while a deployment or migration runs can be lost when the database is
+	 * replaced. Both are off by default. With no options, shows the
+	 * current choice.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [--comments=<on|off>]
+	 * : Pause new visitor comments, reviews, pingbacks and trackbacks during a freeze.
+	 *
+	 * [--forms=<on|off>]
+	 * : Pause visitor submissions of contact and other forms (Contact Form 7,
+	 * WPForms, Gravity Forms, Ninja Forms, Fluent Forms, Forminator and more)
+	 * during a freeze.
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp stillgate scope
+	 *     wp stillgate scope --comments=on --forms=on
+	 *     wp stillgate scope --forms=off
+	 *
+	 * @param string[]             $args
+	 * @param array<string, mixed> $assoc_args
+	 */
+	public function scope( $args, $assoc_args ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- the positional arguments are unused; both parameters are required by WP-CLI's command method signature.
+		$this->suspension->run(
+			function () use ( $assoc_args ): void {
+				$scope = $this->service->scope();
+
+				foreach ( array( Scope::COMMENTS, Scope::FORMS ) as $kind ) {
+					if ( ! isset( $assoc_args[ $kind ] ) ) {
+						continue;
+					}
+
+					$value = strtolower( trim( (string) $assoc_args[ $kind ] ) );
+
+					if ( ! in_array( $value, array( 'on', 'off' ), true ) ) {
+						$this->fail( sprintf( 'Invalid --%s: use "on" or "off".', $kind ) );
+
+						return;
+					}
+
+					$scope = new Scope(
+						Scope::COMMENTS === $kind ? 'on' === $value : $scope->comments,
+						Scope::FORMS === $kind ? 'on' === $value : $scope->forms
+					);
+				}
+
+				$result = $this->service->set_scope( $scope, 'cli' );
+
+				if ( 'scope_saved' === $result ) {
+					\WP_CLI::success( 'The scope was saved.' );
+				}
+
+				\WP_CLI::log( sprintf( 'comments: %s', $this->service->scope()->comments ? 'on' : 'off' ) );
+				\WP_CLI::log( sprintf( 'forms: %s', $this->service->scope()->forms ? 'on' : 'off' ) );
+			}
+		);
+	}
+
+	/**
+	 * Shows what happened to the content during the latest freeze.
+	 *
+	 * The receipt lists the posts saved, created or removed while the freeze
+	 * ran, term changes, comments added, and how many visitor comments and
+	 * form submissions were paused. A clean receipt means the database a
+	 * deploy dumped when the freeze began is still complete.
+	 *
+	 * ## OPTIONS
+	 *
+	 * [--format=<format>]
+	 * : Render output in a particular format.
+	 * ---
+	 * default: table
+	 * options:
+	 *   - table
+	 *   - json
+	 *   - yaml
+	 * ---
+	 *
+	 * [--check]
+	 * : Exit with status 1 when the content changed during the freeze, so a
+	 * deploy script can stop before it relies on a dump that is out of date.
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp stillgate receipt
+	 *     wp stillgate receipt --format=json
+	 *     wp stillgate receipt --check || echo "content changed during the freeze"
+	 *
+	 * @param string[]             $args
+	 * @param array<string, mixed> $assoc_args
+	 */
+	public function receipt( $args, $assoc_args ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.Found -- the positional arguments are unused; both parameters are required by WP-CLI's command method signature.
+		$this->suspension->run(
+			function () use ( $assoc_args ): void {
+				$report = $this->current_receipt();
+
+				if ( null === $report ) {
+					return;
+				}
+
+				$format = isset( $assoc_args['format'] ) && is_string( $assoc_args['format'] ) ? $assoc_args['format'] : 'table';
+
+				if ( 'table' === $format ) {
+					$items = array();
+
+					foreach ( $this->flatten_receipt( $report ) as $field => $value ) {
+						$items[] = array(
+							'Field' => $field,
+							'Value' => $value,
+						);
+					}
+
+					\WP_CLI\Utils\format_items( 'table', $items, array( 'Field', 'Value' ) );
+				} else {
+					\WP_CLI::print_value( $report, array( 'format' => $format ) );
+				}
+
+				if ( ! empty( $assoc_args['check'] ) && false === $report['clean'] ) {
+					$this->suspension->outside(
+						static function (): void {
+							\WP_CLI::halt( 1 );
+						}
+					);
+				}
+			}
+		);
+	}
+
+	/**
+	 * Lists the posts that changed during the latest freeze.
+	 *
+	 * Prints the IDs on one line, comma separated, ready to hand to
+	 * WordPress's own export so they can be carried to another environment:
+	 * wp export --post__in="$(wp stillgate drift)". At most 200 IDs are
+	 * listed; the receipt shows the exact count.
+	 *
+	 * ## EXAMPLES
+	 *
+	 *     wp stillgate drift
+	 *     wp export --post__in="$(wp stillgate drift)" --dir=/tmp
+	 *
+	 * @param string[]             $args
+	 * @param array<string, mixed> $assoc_args
+	 */
+	public function drift( $args, $assoc_args ): void { // phpcs:ignore Generic.CodeAnalysis.UnusedFunctionParameter.FoundAfterLastUsed -- takes no options; both parameters are required by WP-CLI's command method signature.
+		$this->suspension->run(
+			function (): void {
+				$report = $this->current_receipt();
+
+				if ( null === $report ) {
+					return;
+				}
+
+				\WP_CLI::line( implode( ',', $report['content']['changed_ids'] ?? array() ) );
+			}
+		);
+	}
+	/**
 	 * Turns the freeze off.
 	 *
 	 * A currently running scheduled window is cleared too; an upcoming
@@ -290,6 +458,8 @@ final class Command {
 			'schedule_end'            => null !== $config->schedule_end ? DateInput::to_input_value( $config->schedule_end, $timezone ) : '',
 			'schedule_end_utc'        => null !== $config->schedule_end ? gmdate( 'c', $config->schedule_end ) : '',
 			'ends_at_utc'             => null !== $this->service->ends_at() ? gmdate( 'c', $this->service->ends_at() ) : '',
+			'scope_comments'          => $this->service->scope()->comments ? 'true' : 'false',
+			'scope_forms'             => $this->service->scope()->forms ? 'true' : 'false',
 			'timezone'                => wp_timezone_string(),
 			'message'                 => $config->message,
 			'updated_at_utc'          => $config->updated_at > 0 ? gmdate( 'c', $config->updated_at ) : '',
@@ -343,6 +513,54 @@ final class Command {
 				'Stillgate is now active and ends by itself at %s (UTC).',
 				null !== $ends_at ? gmdate( 'c', $ends_at ) : gmdate( 'c', time() + $seconds )
 			)
+		);
+	}
+	/**
+	 * The receipt report, or null (after reporting an error) when receipts
+	 * are unavailable or no freeze has run yet.
+	 *
+	 * @return array<string, mixed>|null
+	 */
+	private function current_receipt(): ?array {
+		if ( null === $this->receipt ) {
+			$this->fail( 'Receipts are not available.' );
+
+			return null;
+		}
+
+		$this->receipt->sync( 'cli' );
+		$report = $this->receipt->report();
+
+		if ( 'none' === $report['state'] ) {
+			$this->fail( 'No freeze has run yet, so there is no receipt.' );
+
+			return null;
+		}
+
+		return $report;
+	}
+
+	/**
+	 * @param array<string, mixed> $report
+	 * @return array<string, string>
+	 */
+	private function flatten_receipt( array $report ): array {
+		$content = $report['content'] ?? array();
+		$paused  = $report['paused'] ?? array();
+
+		return array(
+			'state'            => (string) $report['state'],
+			'opened_at'        => (string) $report['opened_at'],
+			'closed_at'        => (string) ( $report['closed_at'] ?? '' ),
+			'source'           => (string) $report['source'],
+			'clean'            => $report['clean'] ? 'true' : 'false',
+			'changed_posts'    => (string) ( $content['changed_posts'] ?? 0 ),
+			'changed_ids'      => implode( ',', $content['changed_ids'] ?? array() ),
+			'deleted_estimate' => (string) ( $content['deleted_estimate'] ?? 0 ),
+			'terms_changed'    => ! empty( $content['terms_changed'] ) ? 'true' : 'false',
+			'comments_added'   => (string) ( $content['comments_added'] ?? 0 ),
+			'paused_comments'  => (string) ( $paused[ Scope::COMMENTS ] ?? 0 ),
+			'paused_forms'     => (string) ( $paused[ Scope::FORMS ] ?? 0 ),
 		);
 	}
 	private function do_clear_schedule(): void {

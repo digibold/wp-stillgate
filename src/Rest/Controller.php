@@ -10,6 +10,8 @@ namespace Digibold\DeploymentGuard\Rest;
 use Digibold\DeploymentGuard\DateInput;
 use Digibold\DeploymentGuard\FreezeService;
 use Digibold\DeploymentGuard\Installer;
+use Digibold\DeploymentGuard\Receipt;
+use Digibold\DeploymentGuard\Scope;
 
 defined( 'ABSPATH' ) || exit;
 
@@ -38,6 +40,9 @@ defined( 'ABSPATH' ) || exit;
  *     POST   /schedule         Schedule a window: `start`, `end` (required),
  *                              `message` (optional).
  *     DELETE /schedule         Clear the schedule.
+ *     GET    /scope            What a freeze covers beyond editorial content.
+ *     POST   /scope            Choose it: `comments` and `forms` (booleans, both optional).
+ *     GET    /receipt          What happened to the content during the latest freeze.
  */
 final class Controller {
 
@@ -45,8 +50,11 @@ final class Controller {
 
 	private FreezeService $service;
 
-	public function __construct( FreezeService $service ) {
+	private ?Receipt $receipt;
+
+	public function __construct( FreezeService $service, ?Receipt $receipt = null ) {
 		$this->service = $service;
+		$this->receipt = $receipt;
 	}
 
 	public function register(): void {
@@ -144,8 +152,101 @@ final class Controller {
 				),
 			)
 		);
+
+		$this->register_scope_and_receipt_routes();
 	}
 
+	/**
+	 * The /scope and /receipt routes, split out to keep register_routes()
+	 * readable.
+	 */
+	private function register_scope_and_receipt_routes(): void {
+		register_rest_route(
+			self::REST_NAMESPACE,
+			'/scope',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $this, 'get_scope' ),
+					'permission_callback' => array( $this, 'can_view' ),
+				),
+				array(
+					'methods'             => \WP_REST_Server::CREATABLE,
+					'callback'            => array( $this, 'set_scope' ),
+					'permission_callback' => array( $this, 'can_change' ),
+					'args'                => array(
+						Scope::COMMENTS => array(
+							'description' => 'Pause new visitor comments during a freeze.',
+							'type'        => 'boolean',
+						),
+						Scope::FORMS    => array(
+							'description' => 'Pause visitor form submissions during a freeze.',
+							'type'        => 'boolean',
+						),
+					),
+				),
+			)
+		);
+
+		register_rest_route(
+			self::REST_NAMESPACE,
+			'/receipt',
+			array(
+				array(
+					'methods'             => \WP_REST_Server::READABLE,
+					'callback'            => array( $this, 'get_receipt' ),
+					'permission_callback' => array( $this, 'can_view' ),
+				),
+			)
+		);
+	}
+
+	public function get_scope(): \WP_REST_Response {
+		return new \WP_REST_Response( $this->service->scope()->to_array() );
+	}
+
+	public function set_scope( \WP_REST_Request $request ): \WP_REST_Response {
+		$current = $this->service->scope();
+		$params  = $request->get_json_params();
+		$params  = is_array( $params ) ? $params : array();
+
+		$comments = $request->get_param( Scope::COMMENTS );
+		$forms    = $request->get_param( Scope::FORMS );
+
+		if ( null === $comments && array_key_exists( Scope::COMMENTS, $params ) ) {
+			$comments = $params[ Scope::COMMENTS ];
+		}
+
+		if ( null === $forms && array_key_exists( Scope::FORMS, $params ) ) {
+			$forms = $params[ Scope::FORMS ];
+		}
+
+		$result = $this->service->set_scope(
+			new Scope(
+				null === $comments ? $current->comments : rest_sanitize_boolean( $comments ),
+				null === $forms ? $current->forms : rest_sanitize_boolean( $forms )
+			),
+			'rest'
+		);
+
+		$payload           = $this->service->scope()->to_array();
+		$payload['result'] = $result;
+
+		return new \WP_REST_Response( $payload );
+	}
+
+	/**
+	 * @return \WP_REST_Response|\WP_Error
+	 */
+	public function get_receipt() {
+		if ( null === $this->receipt ) {
+			return $this->error( 'receipt_unavailable', 404, __( 'Receipts are not available.', 'stillgate' ) );
+		}
+
+		$this->receipt->sync( 'rest' );
+
+		return new \WP_REST_Response( $this->receipt->report() );
+	}
 	/**
 	 * @return true|\WP_Error
 	 */
@@ -340,6 +441,7 @@ final class Controller {
 				'start' => null !== $config->schedule_start ? DateInput::to_input_value( $config->schedule_start, $timezone ) : null,
 				'end'   => null !== $config->schedule_end ? DateInput::to_input_value( $config->schedule_end, $timezone ) : null,
 			),
+			'scope'           => $this->service->scope()->to_array(),
 			'message'         => $config->message,
 			'updated_at'      => $config->updated_at > 0 ? gmdate( 'c', $config->updated_at ) : null,
 			'updated_by'      => $config->updated_by,
