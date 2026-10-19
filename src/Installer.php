@@ -113,6 +113,8 @@ final class Installer {
 	private static function uninstall_current_site(): void {
 		delete_option( FreezeService::OPTION_STATE );
 		delete_option( FreezeService::OPTION_HISTORY );
+		delete_option( FreezeService::OPTION_SCOPE );
+		delete_option( Receipt::OPTION );
 
 		self::revoke_capability_from_all_roles();
 	}

@@ -273,4 +273,55 @@ final class FreezeServiceTest extends TestCase {
 		$this->assertWPError( $result );
 		$this->assertSame( 'duration_too_short', $result->get_error_code() );
 	}
+	public function test_scope_defaults_to_editorial_only(): void {
+		$service = $this->make_service( self::NOW );
+
+		$this->assertTrue( $service->scope()->is_empty() );
+	}
+
+	public function test_set_scope_saves_logs_and_is_visible_to_another_instance(): void {
+		$service = $this->make_service( self::NOW );
+
+		$this->assertSame( 'scope_saved', $service->set_scope( new \Digibold\DeploymentGuard\Scope( true, false ) ) );
+		$this->assertTrue( $service->scope()->comments );
+		$this->assertFalse( $service->scope()->forms );
+
+		$other = $this->make_service( self::NOW );
+		$this->assertTrue( $other->scope()->comments, 'a second instance reads the stored value' );
+
+		$entry = $service->entries()[0];
+		$this->assertSame( 'scope_changed', $entry['type'] );
+		$this->assertSame( 'comments', $entry['ctx']['target'] );
+	}
+
+	public function test_set_scope_with_nothing_changed_is_unchanged_and_not_logged(): void {
+		$service = $this->make_service( self::NOW );
+		$service->set_scope( new \Digibold\DeploymentGuard\Scope( true, true ) );
+		$count = count( $service->entries() );
+
+		$this->assertSame( 'unchanged', $service->set_scope( new \Digibold\DeploymentGuard\Scope( true, true ) ) );
+		$this->assertCount( $count, $service->entries() );
+	}
+
+	public function test_scope_survives_a_freeze_ending_and_is_not_autoloaded(): void {
+		$service = $this->make_service( self::NOW );
+		$service->set_scope( new \Digibold\DeploymentGuard\Scope( false, true ) );
+		$service->enable();
+		$service->disable();
+
+		$this->assertTrue( $service->scope()->forms );
+
+		global $wpdb;
+		$autoload = $wpdb->get_var( $wpdb->prepare( "SELECT autoload FROM {$wpdb->options} WHERE option_name = %s", 'deployment_guard_scope' ) );
+		$this->assertContains( $autoload, array( 'off', 'no' ) );
+	}
+
+	public function test_scope_can_be_switched_back_to_editorial_only(): void {
+		$service = $this->make_service( self::NOW );
+		$service->set_scope( new \Digibold\DeploymentGuard\Scope( true, true ) );
+		$service->set_scope( new \Digibold\DeploymentGuard\Scope() );
+
+		$this->assertTrue( $service->scope()->is_empty() );
+		$this->assertSame( 'editorial only', $service->entries()[0]['ctx']['target'] );
+	}
 }

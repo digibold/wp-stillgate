@@ -28,7 +28,7 @@ final class UninstallTest extends TestCase {
 		$result = json_decode( $output, true );
 
 		$this->assertIsArray( $result, $output );
-		$this->assertSame( array( 'deployment_guard_state', 'deployment_guard_history' ), $result['deleted'] );
+		$this->assertSame( array( 'deployment_guard_state', 'deployment_guard_history', 'deployment_guard_scope', 'deployment_guard_receipt' ), $result['deleted'] );
 		$this->assertSame( array( 'administrator:deployment_guard_bypass', 'editor:deployment_guard_bypass' ), $result['removed'] );
 	}
 }

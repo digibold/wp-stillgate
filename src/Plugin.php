@@ -64,6 +64,15 @@ final class Plugin {
 			( new Admin\Notices( $guard ) )->register();
 		}
 
+		$receipt = new Receipt( $this->service, $guard, $clock );
+		$receipt->register();
+
+		// Optional pauses of visitor comments and form submissions; both are
+		// off unless the site turned them on, and neither reads the freeze
+		// state until a request that looks like a submission arrives.
+		( new Enforcement\CommentGate( $guard, $receipt ) )->register();
+		( new Enforcement\FormGate( $guard, $receipt ) )->register();
+
 		( new Enforcement\RestGate( $guard ) )->register();
 		( new Rest\Controller( $this->service ) )->register();
 		( new Enforcement\XmlRpcGate( $guard ) )->register();

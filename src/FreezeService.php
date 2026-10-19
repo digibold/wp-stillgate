@@ -20,6 +20,7 @@ final class FreezeService {
 
 	public const OPTION_STATE   = 'deployment_guard_state';
 	public const OPTION_HISTORY = 'deployment_guard_history';
+	public const OPTION_SCOPE   = 'deployment_guard_scope';
 
 	/**
 	 * Shortest freeze the timed actions will start or extend by.
@@ -33,6 +34,8 @@ final class FreezeService {
 	private ?FreezeConfig $config = null;
 
 	private ?History $history = null;
+
+	private ?Scope $scope = null;
 
 	public function __construct( \Closure $clock, Suspension $suspension ) {
 		$this->clock      = $clock;
@@ -54,12 +57,17 @@ final class FreezeService {
 		add_action( 'update_option_' . self::OPTION_HISTORY, array( $this, 'invalidate_history' ) );
 		add_action( 'delete_option_' . self::OPTION_HISTORY, array( $this, 'invalidate_history' ) );
 
+		add_action( 'add_option_' . self::OPTION_SCOPE, array( $this, 'invalidate_scope' ) );
+		add_action( 'update_option_' . self::OPTION_SCOPE, array( $this, 'invalidate_scope' ) );
+		add_action( 'delete_option_' . self::OPTION_SCOPE, array( $this, 'invalidate_scope' ) );
+
 		// Both caches belong to the site they were read from: after
 		// switch_to_blog()/restore_current_blog(), read them again from
 		// the site that is now current, rather than enforcing (or logging
 		// to) one site with another site's state.
 		add_action( 'switch_blog', array( $this, 'invalidate_config' ) );
 		add_action( 'switch_blog', array( $this, 'invalidate_history' ) );
+		add_action( 'switch_blog', array( $this, 'invalidate_scope' ) );
 	}
 
 	public function invalidate_config(): void {
@@ -68,6 +76,21 @@ final class FreezeService {
 
 	public function invalidate_history(): void {
 		$this->history = null;
+	}
+
+	public function invalidate_scope(): void {
+		$this->scope = null;
+	}
+
+	/**
+	 * What the freeze covers beyond editorial content (see Scope).
+	 */
+	public function scope(): Scope {
+		if ( null === $this->scope ) {
+			$this->scope = Scope::from_array( get_option( self::OPTION_SCOPE, array() ) );
+		}
+
+		return $this->scope;
 	}
 
 	public function config(): FreezeConfig {
@@ -352,6 +375,35 @@ final class FreezeService {
 		$this->dispatch_state_changed( $new, $old, $source );
 
 		return 'message_saved';
+	}
+
+	/**
+	 * Choose which optional protections a freeze adds (see Scope). Takes
+	 * effect immediately for a freeze that is already running.
+	 *
+	 * @return string 'scope_saved', or 'unchanged' when nothing differs.
+	 */
+	public function set_scope( Scope $scope, string $source = 'ui' ): string {
+		Installer::maybe_install();
+
+		$old = $this->scope();
+
+		if ( $old->to_array() === $scope->to_array() ) {
+			return 'unchanged';
+		}
+
+		$this->scope = $scope;
+		update_option( self::OPTION_SCOPE, $scope->to_array(), false );
+
+		$this->log(
+			'scope_changed',
+			array(
+				'source' => $source,
+				'target' => $scope->is_empty() ? 'editorial only' : implode( ',', $scope->enabled_kinds() ),
+			)
+		);
+
+		return 'scope_saved';
 	}
 
 	/**

@@ -476,6 +476,71 @@ final class Guard {
 	}
 
 	/**
+	 * Whether visitor submissions of the given kind are paused for the
+	 * current request: a freeze is active, the site chose to pause that
+	 * kind (see Scope), and the actor is not somebody who can bypass the
+	 * freeze. Unlike is_restricted() this also covers anonymous visitors,
+	 * since they are exactly who comments and contact forms come from; it
+	 * is only ever asked at the moment a submission arrives, never on an
+	 * ordinary page view.
+	 *
+	 * @param string $kind One of Scope::KINDS.
+	 */
+	public function submissions_paused( string $kind ): bool {
+		if ( ! did_action( 'init' ) || $this->suspension->active() ) {
+			return false;
+		}
+
+		if ( ! $this->service->scope()->includes( $kind ) || ! $this->service->is_active() ) {
+			return false;
+		}
+
+		if ( 'cron' !== $this->context() && current_user_can( Installer::CAPABILITY ) ) {
+			return false;
+		}
+
+		/**
+		 * Filters whether visitor submissions of a kind are paused right
+		 * now, once a freeze, the site's scope settings and the actor have
+		 * all said yes.
+		 *
+		 * @param bool   $paused Whether the submission is paused.
+		 * @param string $kind   Either 'comments' or 'forms'.
+		 */
+		return (bool) apply_filters( 'deployment_guard_submissions_paused', true, $kind );
+	}
+
+	/**
+	 * What a visitor is told when a submission is paused.
+	 *
+	 * @param string $kind One of Scope::KINDS.
+	 */
+	public function visitor_message( string $kind ): string {
+		$text = Scope::COMMENTS === $kind
+			? __( 'Comments are temporarily paused while the site is being updated.', 'stillgate' )
+			: __( 'Form submissions are temporarily paused while the site is being updated.', 'stillgate' );
+
+		$ends_at = $this->ends_at();
+
+		if ( null !== $ends_at ) {
+			$text .= ' ' . sprintf(
+				/* translators: %s: date and time submissions are expected to reopen. */
+				__( 'Please try again after %s.', 'stillgate' ),
+				$this->format_datetime( $ends_at )
+			);
+		} else {
+			$text .= ' ' . __( 'Please try again in a few minutes.', 'stillgate' );
+		}
+
+		/**
+		 * Filters the message shown to a visitor whose submission is paused.
+		 *
+		 * @param string $text Message text (plain text).
+		 * @param string $kind Either 'comments' or 'forms'.
+		 */
+		return (string) apply_filters( 'deployment_guard_visitor_message', $text, $kind );
+	}
+	/**
 	 * Whether a freeze is in effect right now, independent of any actor
 	 * or capability. Used only where there is no user to check a
 	 * capability against at all, such as post-by-email (which runs as
